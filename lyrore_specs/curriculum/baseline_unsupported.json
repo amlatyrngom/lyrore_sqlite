@@ -1,0 +1,7 @@
+{
+  "udfs": [],
+  "queries": [],
+  "warnings": [
+    "generate_date_range TVF is implemented as recursive CTE workaround (Q_NEW_11, Q_NEW_19)"
+  ]
+}

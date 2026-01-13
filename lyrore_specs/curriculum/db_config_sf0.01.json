@@ -1,0 +1,6 @@
+{
+  "db_path": "/tmp/curriculum_sqlite_sf0.01.db",
+  "data_dir": "/tmp/curriculum_data_sf0.01",
+  "scale_factor": 0.01,
+  "extension_path": null
+}
