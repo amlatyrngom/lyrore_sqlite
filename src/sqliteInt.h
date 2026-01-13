@@ -1785,6 +1785,9 @@ struct sqlite3 {
   int *pnBytesFreed;            /* If not NULL, increment this in DbFree() */
   DbClientData *pDbData;        /* sqlite3_set_clientdata() content */
   u64 nSpill;                   /* TEMP content spilled to disk */
+#ifdef SQLITE_ENABLE_LYRORE
+  struct LyroreContext *pLyrore; /* Lyrore optimization context */
+#endif
 #ifdef SQLITE_ENABLE_UNLOCK_NOTIFY
   /* The following variables are all protected by the STATIC_MAIN
   ** mutex, not by sqlite3.mutex. They are used by code in notify.c.
@@ -1868,6 +1871,16 @@ struct sqlite3 {
 #define SQLITE_AttachCreate   HI(0x00010) /* ATTACH allowed to create new dbs */
 #define SQLITE_AttachWrite    HI(0x00020) /* ATTACH allowed to open for write */
 #define SQLITE_Comments       HI(0x00040) /* Enable SQL comments */
+
+/* Lyrore optimization flags */
+#ifdef SQLITE_ENABLE_LYRORE
+#define SQLITE_LyroreEnabled  HI(0x00080) /* Master enable for Lyrore */
+#define SQLITE_LyroreCost     HI(0x00100) /* Cost correction enabled */
+#define SQLITE_LyrorePlanRL   HI(0x00200) /* Plan RL selection enabled */
+#define SQLITE_LyroreFlavor   HI(0x00400) /* Flavor selection enabled */
+#define SQLITE_LyroreFusion   HI(0x00800) /* Fused operators enabled */
+#define SQLITE_LyroreColstore HI(0x01000) /* Columnar storage enabled */
+#endif
 
 /* Flags used only if debugging */
 #ifdef SQLITE_DEBUG

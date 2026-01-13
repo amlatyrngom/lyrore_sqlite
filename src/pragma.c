@@ -12,6 +12,9 @@
 ** This file contains code used to implement the PRAGMA command.
 */
 #include "sqliteInt.h"
+#ifdef SQLITE_ENABLE_LYRORE
+#include "lyrore_stats.h"
+#endif
 
 #if !defined(SQLITE_ENABLE_LOCKING_STYLE)
 #  if defined(__APPLE__)
@@ -2759,6 +2762,17 @@ void sqlite3Pragma(
     }
   }
   break;
+#endif
+
+#ifdef SQLITE_ENABLE_LYRORE
+  case PragTyp_LYRORE_PERSIST: {
+    lyrorePersistNow(db);
+    break;
+  }
+  case PragTyp_LYRORE_RESET: {
+    lyroreReset(db);
+    break;
+  }
 #endif
 
   } /* End of the PRAGMA switch */

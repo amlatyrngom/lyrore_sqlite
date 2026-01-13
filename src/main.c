@@ -16,6 +16,11 @@
 */
 #include "sqliteInt.h"
 
+#ifdef SQLITE_ENABLE_LYRORE
+#include "lyrore_model.h"
+#include "lyrore_stats.h"
+#endif
+
 #ifdef SQLITE_ENABLE_FTS3
 # include "fts3.h"
 #endif
@@ -1441,6 +1446,9 @@ void sqlite3LeaveMutexAndCloseZombie(sqlite3 *db){
 
   sqlite3Error(db, SQLITE_OK); /* Deallocates any cached error strings. */
   sqlite3ValueFree(db->pErr);
+#ifdef SQLITE_ENABLE_LYRORE
+  lyroreShutdown(db);
+#endif
   sqlite3CloseExtensions(db);
 
   db->eOpenState = SQLITE_STATE_ERROR;
@@ -3588,6 +3596,11 @@ static int openDatabase(
   sqlite3RegisterPerConnectionBuiltinFunctions(db);
   rc = sqlite3_errcode(db);
 
+#ifdef SQLITE_ENABLE_LYRORE
+  if( rc==SQLITE_OK ){
+    rc = lyroreInit(db);
+  }
+#endif
 
   /* Load compiled-in extensions */
   for(i=0; rc==SQLITE_OK && i<ArraySize(sqlite3BuiltinExtensions); i++){

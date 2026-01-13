@@ -200,6 +200,9 @@ foreach hdr {
    wal.h
    whereInt.h
    sqlite3recover.h
+   lyrore_model.h
+   lyrore_features.h
+   lyrore_stats.h
 } {
   set available_hdr($hdr) 1
 }
@@ -462,6 +465,9 @@ set flist {
    whereexpr.c
    where.c
    window.c
+   lyrore_model.c
+   lyrore_features.c
+   lyrore_stats.c
 
    parse.c
 

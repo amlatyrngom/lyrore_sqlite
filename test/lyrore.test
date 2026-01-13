@@ -1,0 +1,159 @@
+# 2024 January 13
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#***********************************************************************
+# This file implements regression tests for the Lyrore ML-ready
+# optimization framework.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+# Skip if LYRORE not enabled
+ifcapable !lyrore {
+  finish_test
+  return
+}
+
+#-----------------------------------------------------------------------
+# Test 1: PRAGMA lyrore_enabled
+#-----------------------------------------------------------------------
+do_test lyrore-1.1 {
+  execsql { PRAGMA lyrore_enabled }
+} {1}
+
+do_test lyrore-1.2 {
+  execsql { PRAGMA lyrore_enabled = OFF }
+  execsql { PRAGMA lyrore_enabled }
+} {0}
+
+do_test lyrore-1.3 {
+  execsql { PRAGMA lyrore_enabled = ON }
+  execsql { PRAGMA lyrore_enabled }
+} {1}
+
+#-----------------------------------------------------------------------
+# Test 2: Other Lyrore flags
+#-----------------------------------------------------------------------
+do_test lyrore-2.1 {
+  execsql { PRAGMA lyrore_cost }
+} {0}
+
+do_test lyrore-2.2 {
+  execsql { PRAGMA lyrore_cost = ON }
+  execsql { PRAGMA lyrore_cost }
+} {1}
+
+do_test lyrore-2.3 {
+  execsql { PRAGMA lyrore_plan_rl }
+} {0}
+
+do_test lyrore-2.4 {
+  execsql { PRAGMA lyrore_flavor }
+} {0}
+
+do_test lyrore-2.5 {
+  execsql { PRAGMA lyrore_fusion }
+} {0}
+
+#-----------------------------------------------------------------------
+# Test 3: State tables creation (requires file database)
+#-----------------------------------------------------------------------
+db close
+forcedelete test_lyrore.db
+sqlite3 db test_lyrore.db
+
+do_test lyrore-3.1 {
+  execsql {
+    SELECT name FROM sqlite_master 
+    WHERE name LIKE 'lyrore_%' 
+    ORDER BY name
+  }
+} {lyrore_column_stats lyrore_exec_history lyrore_model_state}
+
+#-----------------------------------------------------------------------
+# Test 4: State persistence and reset
+#-----------------------------------------------------------------------
+do_test lyrore-4.1 {
+  execsql { PRAGMA lyrore_persist }
+} {}
+
+do_test lyrore-4.2 {
+  execsql { PRAGMA lyrore_reset }
+} {}
+
+#-----------------------------------------------------------------------
+# Test 5: Passthrough - basic queries work normally
+#-----------------------------------------------------------------------
+do_test lyrore-5.1 {
+  execsql {
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT, c REAL);
+    INSERT INTO t1 VALUES(1, 'hello', 3.14);
+    INSERT INTO t1 VALUES(2, 'world', 2.71);
+    SELECT * FROM t1 ORDER BY a;
+  }
+} {1 hello 3.14 2 world 2.71}
+
+do_test lyrore-5.2 {
+  execsql {
+    SELECT COUNT(*) FROM t1 WHERE b = 'hello';
+  }
+} {1}
+
+do_test lyrore-5.3 {
+  execsql {
+    SELECT SUM(c) FROM t1;
+  }
+} {5.85}
+
+#-----------------------------------------------------------------------
+# Test 6: Joins work correctly with Lyrore enabled
+#-----------------------------------------------------------------------
+do_test lyrore-6.1 {
+  execsql {
+    CREATE TABLE t2(x INTEGER, y TEXT);
+    INSERT INTO t2 VALUES(1, 'one');
+    INSERT INTO t2 VALUES(2, 'two');
+    SELECT t1.a, t1.b, t2.y FROM t1 JOIN t2 ON t1.a = t2.x ORDER BY t1.a;
+  }
+} {1 hello one 2 world two}
+
+#-----------------------------------------------------------------------
+# Test 7: Index scans work
+#-----------------------------------------------------------------------
+do_test lyrore-7.1 {
+  execsql {
+    CREATE INDEX idx_t1_b ON t1(b);
+    SELECT a FROM t1 WHERE b = 'hello';
+  }
+} {1}
+
+#-----------------------------------------------------------------------
+# Test 8: In-memory DB (no state persistence expected, but should work)
+#-----------------------------------------------------------------------
+db close
+sqlite3 db :memory:
+
+do_test lyrore-8.1 {
+  execsql { PRAGMA lyrore_enabled }
+} {1}
+
+do_test lyrore-8.2 {
+  execsql {
+    CREATE TABLE m1(id INTEGER PRIMARY KEY, val TEXT);
+    INSERT INTO m1 VALUES(1, 'test');
+    SELECT * FROM m1;
+  }
+} {1 test}
+
+# Clean up
+db close
+forcedelete test_lyrore.db
+
+finish_test

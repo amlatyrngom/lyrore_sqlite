@@ -406,6 +406,41 @@ set pragma_def {
   TYPE: FLAG
   ARG:  SQLITE_LegacyAlter
   IF:   !defined(SQLITE_OMIT_FLAG_PRAGMAS)
+
+  NAME: lyrore_cost
+  TYPE: FLAG
+  ARG:  SQLITE_LyroreCost
+  IF:   defined(SQLITE_ENABLE_LYRORE)
+
+  NAME: lyrore_enabled
+  TYPE: FLAG
+  ARG:  SQLITE_LyroreEnabled
+  IF:   defined(SQLITE_ENABLE_LYRORE)
+
+  NAME: lyrore_flavor
+  TYPE: FLAG
+  ARG:  SQLITE_LyroreFlavor
+  IF:   defined(SQLITE_ENABLE_LYRORE)
+
+  NAME: lyrore_fusion
+  TYPE: FLAG
+  ARG:  SQLITE_LyroreFusion
+  IF:   defined(SQLITE_ENABLE_LYRORE)
+
+  NAME: lyrore_persist
+  TYPE: LYRORE_PERSIST
+  FLAG: NoColumns
+  IF:   defined(SQLITE_ENABLE_LYRORE)
+
+  NAME: lyrore_plan_rl
+  TYPE: FLAG
+  ARG:  SQLITE_LyrorePlanRL
+  IF:   defined(SQLITE_ENABLE_LYRORE)
+
+  NAME: lyrore_reset
+  TYPE: LYRORE_RESET
+  FLAG: NoColumns
+  IF:   defined(SQLITE_ENABLE_LYRORE)
 }
 
 # Open the output file

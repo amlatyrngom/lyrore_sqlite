@@ -269,7 +269,7 @@ EXTRA_SRC ?=
 # invocations of $(B.cc)). The configure process does not set either
 # of $(OPTIONS) or $(OPTS).
 #
-OPT_FEATURE_FLAGS ?=
+OPT_FEATURE_FLAGS ?= -DSQLITE_ENABLE_LYRORE=1
 #
 # $(SHELL_OPT) =
 #
@@ -557,7 +557,8 @@ LIBOBJS0 = alter.o analyze.o attach.o auth.o \
          vdbe.o vdbeapi.o vdbeaux.o vdbeblob.o vdbemem.o vdbesort.o \
          vdbetrace.o vdbevtab.o vtab.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
-         window.o
+         window.o \
+         lyrore_model.o lyrore_features.o lyrore_stats.o
 LIBOBJS = $(LIBOBJS0)
 
 #
@@ -681,7 +682,13 @@ SRC = \
   $(TOP)/src/wherecode.c \
   $(TOP)/src/whereexpr.c \
   $(TOP)/src/whereInt.h \
-  $(TOP)/src/window.c
+  $(TOP)/src/window.c \
+  $(TOP)/src/lyrore_model.c \
+  $(TOP)/src/lyrore_model.h \
+  $(TOP)/src/lyrore_features.c \
+  $(TOP)/src/lyrore_features.h \
+  $(TOP)/src/lyrore_stats.c \
+  $(TOP)/src/lyrore_stats.h
 
 # Source code for extensions
 #
