@@ -203,6 +203,7 @@ foreach hdr {
    lyrore_model.h
    lyrore_features.h
    lyrore_stats.h
+   lyrore_pattern.h
 } {
   set available_hdr($hdr) 1
 }
@@ -468,6 +469,7 @@ set flist {
    lyrore_model.c
    lyrore_features.c
    lyrore_stats.c
+   lyrore_pattern.c
 
    parse.c
 

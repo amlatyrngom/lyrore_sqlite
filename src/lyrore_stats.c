@@ -20,6 +20,7 @@
 #ifdef SQLITE_ENABLE_LYRORE
 #include "lyrore_model.h"
 #include "lyrore_stats.h"
+#include "lyrore_pattern.h"
 
 /*
 ** Static flag to prevent recursive initialization when
@@ -53,6 +54,14 @@ static const char *azCreateStateTables[] = {
     "total_count INT, "
     "PRIMARY KEY(tbl, col))",
 
+  "CREATE TABLE IF NOT EXISTS lyrore_pattern_state("
+    "pattern_name TEXT NOT NULL, "
+    "model_slot TEXT NOT NULL, "
+    "state_blob BLOB, "
+    "sample_count INTEGER DEFAULT 0, "
+    "last_updated INTEGER, "
+    "PRIMARY KEY(pattern_name, model_slot))",
+
   0  /* Sentinel */
 };
 
@@ -85,6 +94,11 @@ int lyroreInit(sqlite3 *db){
   ctx->nModels = 0;
   ctx->dirty = 0;
   ctx->pStateDb = 0;
+
+  /* Initialize pattern registries (Step 1.5) */
+  lyroreInitPatternRegistry(&ctx->costPatterns);
+  lyroreInitPatternRegistry(&ctx->planPatterns);
+  lyroreInitPatternRegistry(&ctx->exprPatterns);
 
   /* Get database path */
   zPath = sqlite3_db_filename(db, "main");
@@ -138,10 +152,16 @@ void lyroreShutdown(sqlite3 *db){
   ctx = db->pLyrore;
   if( ctx==0 ) return;
 
-  /* Persist any dirty state */
+  /* Persist any dirty state (including pattern state) */
   if( ctx->dirty > 0 ){
     lyrorePersistNow(db);
   }
+
+  /* Persist and destroy pattern registries (Step 1.5) */
+  lyrorePersistAllPatterns(db);
+  lyroreDestroyPatternRegistry(&ctx->costPatterns);
+  lyroreDestroyPatternRegistry(&ctx->planPatterns);
+  lyroreDestroyPatternRegistry(&ctx->exprPatterns);
 
   /* Destroy all registered models */
   pEntry = ctx->pModels;
@@ -224,6 +244,7 @@ int lyroreReset(sqlite3 *db){
     sqlite3_exec(ctx->pStateDb, "DELETE FROM lyrore_model_state", 0, 0, 0);
     sqlite3_exec(ctx->pStateDb, "DELETE FROM lyrore_exec_history", 0, 0, 0);
     sqlite3_exec(ctx->pStateDb, "DELETE FROM lyrore_column_stats", 0, 0, 0);
+    sqlite3_exec(ctx->pStateDb, "DELETE FROM lyrore_pattern_state", 0, 0, 0);
   }
 
   /* Reset dirty counter */

@@ -23,6 +23,7 @@ typedef struct LyroreContext LyroreContext;
 typedef struct LyroreModelOps LyroreModelOps;
 typedef struct LyroreModelEntry LyroreModelEntry;
 typedef struct LyroreFeatures LyroreFeatures;
+typedef struct LyrorePatternRegistry LyrorePatternRegistry;
 
 /*
 ** Feature extraction flags for lyroreFeaturesToArrayMasked().
@@ -133,6 +134,99 @@ struct LyroreModelEntry {
   LyroreModelEntry *pNext;  /* Next entry in linked list */
 };
 
+
+/*
+** Pattern Matching Framework Types (Step 1.5)
+*/
+
+/* Forward declarations for pattern framework */
+struct WhereLoop;
+struct WhereInfo;
+struct Parse;
+struct Expr;
+struct Table;
+
+/*
+** Pattern ID enum - workload-specific patterns added here.
+*/
+typedef enum {
+  LYRORE_PAT_DEFAULT = 0,
+  LYRORE_PAT_COST_BASE = 100,
+  LYRORE_PAT_PLAN_BASE = 200,
+  LYRORE_PAT_EXPR_BASE = 300,
+  LYRORE_PAT_WORKLOAD_BASE = 1000,
+  LYRORE_PAT_COUNT = 2000
+} LyrorePatternId;
+
+/*
+** Pattern category enum - determines which registry to use.
+*/
+typedef enum {
+  LYRORE_CAT_COST = 1,    /* Cost/cardinality estimation (where.c) */
+  LYRORE_CAT_PLAN = 2,    /* Plan selection (wherePathSolver) */
+  LYRORE_CAT_EXPR = 3     /* Expression codegen (expr.c) */
+} LyrorePatternCategory;
+
+/*
+** Typed matcher functions - return 1 if pattern matches, 0 otherwise.
+*/
+typedef int (*LyroreCostMatcher)(struct WhereLoop*, struct Table*, void*);
+typedef int (*LyrorePlanMatcher)(struct WhereInfo*, void*);
+typedef int (*LyroreExprMatcher)(struct Parse*, struct Expr*, void*);
+
+/*
+** Feature extractors - populate LyroreFeatures with pattern-specific features.
+*/
+typedef void (*LyroreCostFeatureExtractor)(struct WhereLoop*, struct Table*, LyroreFeatures*);
+typedef void (*LyrorePlanFeatureExtractor)(struct WhereInfo*, LyroreFeatures*);
+typedef void (*LyroreExprFeatureExtractor)(struct Parse*, struct Expr*, LyroreFeatures*);
+
+/*
+** Pattern Definition Structure
+*/
+struct LyrorePatternDef {
+  LyrorePatternId id;           /* Numeric ID for fast dispatch */
+  const char *zName;            /* String name for debugging/persistence */
+  LyrorePatternCategory category;
+  int priority;                 /* Higher priority checked first (0-1000) */
+
+  /* Matcher function - union discriminated by category */
+  union {
+    LyroreCostMatcher xCostMatch;
+    LyrorePlanMatcher xPlanMatch;
+    LyroreExprMatcher xExprMatch;
+    void *xGenericMatch;
+  } matcher;
+
+  /* Feature extraction - union discriminated by category */
+  union {
+    LyroreCostFeatureExtractor xCostFeatures;
+    LyrorePlanFeatureExtractor xPlanFeatures;
+    LyroreExprFeatureExtractor xExprFeatures;
+    void *xGenericFeatures;
+  } features;
+  int nExtendedFeatures;        /* Number of extended features */
+
+  /* Pattern-specific models (NULL = use global model) */
+  LyroreModelOps *pCostModel;
+  void *pCostState;
+  LyroreModelOps *pSelectModel;
+  void *pSelectState;
+
+  void *pMatchCtx;              /* Context for matcher */
+};
+typedef struct LyrorePatternDef LyrorePatternDef;
+
+/*
+** Pattern Registry Structure
+*/
+struct LyrorePatternRegistry {
+  int nPatterns;                /* Number of registered patterns */
+  int nAlloc;                   /* Allocated slots */
+  LyrorePatternDef **aPatterns; /* Sorted by priority (descending) */
+  LyrorePatternDef defaultPat;  /* Default fallback pattern */
+};
+
 /*
 ** LyroreContext - Per-connection context.
 **
@@ -145,6 +239,11 @@ struct LyroreContext {
   int nModels;               /* Number of registered models */
   int dirty;                 /* Queries since last persist */
   int persistThreshold;      /* Persist after this many queries (default 100) */
+
+  /* Pattern registries (Step 1.5) */
+  LyrorePatternRegistry costPatterns;  /* Cost/cardinality patterns */
+  LyrorePatternRegistry planPatterns;  /* Plan selection patterns */
+  LyrorePatternRegistry exprPatterns;  /* Expression flavor patterns */
 };
 
 /*
