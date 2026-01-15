@@ -1880,6 +1880,7 @@ struct sqlite3 {
 #define SQLITE_LyroreFlavor   HI(0x00400) /* Flavor selection enabled */
 #define SQLITE_LyroreFusion   HI(0x00800) /* Fused operators enabled */
 #define SQLITE_LyroreColstore HI(0x01000) /* Columnar storage enabled */
+#define SQLITE_LyrorePlugins  HI(0x02000) /* Allow plugin loading */
 #endif
 
 /* Flags used only if debugging */

@@ -2834,6 +2834,11 @@ static int whereLoopInsert(WhereLoopBuilder *pBuilder, WhereLoop *pTemplate){
     return SQLITE_DONE;
   }
   pBuilder->iPlanLimit--;
+#ifdef SQLITE_ENABLE_LYRORE
+  { extern void lyroreInvokeEstimateHooks(sqlite3*, WhereLoopBuilder*, WhereLoop*);
+    lyroreInvokeEstimateHooks(db, pBuilder, pTemplate); }
+#endif
+
 
   whereLoopAdjustCost(pWInfo->pLoops, pTemplate);
 

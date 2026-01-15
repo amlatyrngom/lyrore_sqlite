@@ -227,11 +227,117 @@ struct LyrorePatternRegistry {
   LyrorePatternDef defaultPat;  /* Default fallback pattern */
 };
 
+
+/*
+** Forward declarations for hook parameters (Step 2)
+*/
+typedef struct Vdbe Vdbe;
+typedef struct Select Select;
+
+/*
+** Hook type definitions (Step 2)
+*/
+
+/* Return values for pre-opt hooks */
+#define LYRORE_REWRITE_NONE     0
+#define LYRORE_REWRITE_MODIFIED 1
+#define LYRORE_REWRITE_ERROR   -1
+
+/* Pre-Optimization Hook - transforms expressions before WHERE optimization */
+typedef struct LyrorePreOptHook {
+  const char *zName;           /* Hook identifier */
+  int priority;                /* Higher = run first */
+  int (*xRewrite)(sqlite3*, Parse*, Select*, void*);
+  void *pCtx;                  /* Hook context */
+} LyrorePreOptHook;
+
+/* Estimate Hook - overrides cost/cardinality estimates */
+typedef struct LyroreEstimateHook {
+  const char *zName;           /* Hook identifier */
+  int priority;                /* Higher = run first */
+  int (*xMatch)(sqlite3*, WhereLoopBuilder*, WhereLoop*, void*);
+  void (*xAdjust)(sqlite3*, WhereLoopBuilder*, WhereLoop*, void*);
+  void *pCtx;                  /* Hook context */
+} LyroreEstimateHook;
+
+/* Post-Query Statistics */
+typedef struct LyroreLoopStats {
+  const char *zExplain;        /* EXPLAIN output for this loop */
+  i64 estRows;                 /* Estimated rows */
+  i64 actualRows;              /* Actual rows (-1 if unknown) */
+  double qError;               /* Q-error = max(est/actual, actual/est) */
+} LyroreLoopStats;
+
+typedef struct LyroreQueryStats {
+  const char *zSql;            /* SQL text */
+  u64 queryHash;               /* Query hash */
+  i64 execTimeUs;              /* Execution time in microseconds */
+  i64 nVmStep;                 /* VDBE steps executed */
+  int nLoops;                  /* Number of loop stats */
+  LyroreLoopStats *aLoops;     /* Per-loop statistics (dynamically allocated) */
+  int nCustom;                 /* Number of custom metrics */
+  double *aCustom;             /* Plugin-provided custom metrics */
+} LyroreQueryStats;
+
+/* Post-Query Hook - collects execution statistics */
+typedef struct LyrorePostQueryHook {
+  const char *zName;           /* Hook identifier */
+  void (*xCollect)(sqlite3*, Vdbe*, LyroreQueryStats*, void*);
+  void *pCtx;                  /* Hook context */
+} LyrorePostQueryHook;
+
+/* Analyze Hook - trains models during ANALYZE */
+typedef struct LyroreAnalyzeHook {
+  const char *zName;           /* Hook identifier */
+  void (*xAnalyze)(sqlite3*, int iDb, void*);
+  void *pCtx;                  /* Hook context */
+} LyroreAnalyzeHook;
+
+/*
+** Plugin types (Step 2)
+*/
+#define LYRORE_PLUGIN_VERSION 1
+#define LYRORE_PLUGIN_ENTRY "lyrore_plugin_info"
+
+/* Plugin entry structure provided by plugins */
+typedef struct LyrorePluginInfo {
+  int version;                             /* API version (1) */
+  const char *name;                        /* Plugin identifier */
+
+  /* Hook Arrays (NULL = not provided) */
+  LyroreAnalyzeHook *aAnalyzeHooks;        int nAnalyzeHooks;
+  LyrorePreOptHook *aPreOptHooks;          int nPreOptHooks;
+  LyroreEstimateHook *aEstimateHooks;      int nEstimateHooks;
+  LyrorePostQueryHook *aPostQueryHooks;    int nPostQueryHooks;
+
+  /* Lifecycle callbacks */
+  int (*xInit)(sqlite3 *db, void **ppCtx);
+  void (*xShutdown)(void *pCtx);
+  void (*xSchemaChange)(sqlite3 *db, void *pCtx);
+} LyrorePluginInfo;
+
+/* Loaded plugin entry */
+typedef struct LyrorePluginEntry {
+  char *zName;                 /* Plugin name */
+  char *zPath;                 /* Path to .so file */
+  void *pHandle;               /* dlopen handle */
+  LyrorePluginInfo *pInfo;     /* Plugin info from entry point */
+  void *pCtx;                  /* Plugin context from xInit */
+  struct LyrorePluginEntry *pNext;  /* Linked list */
+} LyrorePluginEntry;
+
+/* Hook array structure for dynamic allocation */
+typedef struct LyroreHookArray {
+  void *a;                     /* Array of hooks (cast to specific type) */
+  int n;                       /* Number of registered hooks */
+  int nAlloc;                  /* Allocated slots */
+} LyroreHookArray;
+
 /*
 ** LyroreContext - Per-connection context.
 **
 ** This is the central state container attached to each sqlite3 connection.
-** It manages the model registry and dedicated state connection.
+** It manages the model registry, pattern registries, hooks, and plugins.
 */
 struct LyroreContext {
   sqlite3 *pStateDb;         /* Dedicated connection for state persistence */
@@ -244,6 +350,35 @@ struct LyroreContext {
   LyrorePatternRegistry costPatterns;  /* Cost/cardinality patterns */
   LyrorePatternRegistry planPatterns;  /* Plan selection patterns */
   LyrorePatternRegistry exprPatterns;  /* Expression flavor patterns */
+
+  /* Plugin management (Step 2) */
+  LyrorePluginEntry *pPlugins;         /* Linked list of loaded plugins */
+  int nPlugins;                        /* Number of loaded plugins */
+
+  /* Hook arrays (Step 2) - sorted by priority (descending) */
+  struct {
+    LyrorePreOptHook *a;
+    int n;
+    int nAlloc;
+  } preOptHooks;
+
+  struct {
+    LyroreEstimateHook *a;
+    int n;
+    int nAlloc;
+  } estimateHooks;
+
+  struct {
+    LyrorePostQueryHook *a;
+    int n;
+    int nAlloc;
+  } postQueryHooks;
+
+  struct {
+    LyroreAnalyzeHook *a;
+    int n;
+    int nAlloc;
+  } analyzeHooks;
 };
 
 /*
@@ -263,6 +398,16 @@ void lyroreFreeFeatures(LyroreFeatures *pFeat);
 int lyroreFeaturesToArray(LyroreFeatures *pFeat, double *aOut, int nMax);
 int lyroreFeaturesToArrayMasked(LyroreFeatures *pFeat, double *aOut,
                                  int nMax, u32 featureMask);
+
+/*
+** Hook Invocation Forward Declarations (Step 2)
+** These are declared here to ensure they are visible before the call sites
+** in select.c, where.c, vdbeaux.c, and vdbe.c.
+*/
+int lyroreInvokePreOptHooks(sqlite3 *db, Parse *pParse, Select *p);
+void lyroreInvokeEstimateHooks(sqlite3 *db, WhereLoopBuilder *pBuilder, WhereLoop *pLoop);
+void lyroreInvokePostQueryHooks(sqlite3 *db, Vdbe *p);
+void lyroreInvokeAnalyzeHooks(sqlite3 *db, int iDb);
 
 #endif /* SQLITE_ENABLE_LYRORE */
 #endif /* SQLITE_LYRORE_MODEL_H */

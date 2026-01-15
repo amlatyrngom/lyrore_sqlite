@@ -558,7 +558,7 @@ LIBOBJS0 = alter.o analyze.o attach.o auth.o \
          vdbetrace.o vdbevtab.o vtab.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
          window.o \
-         lyrore_model.o lyrore_features.o lyrore_stats.o lyrore_pattern.o
+         lyrore_model.o lyrore_features.o lyrore_stats.o lyrore_pattern.o lyrore_hooks.o lyrore_plugin.o
 LIBOBJS = $(LIBOBJS0)
 
 #
@@ -690,7 +690,11 @@ SRC = \
   $(TOP)/src/lyrore_stats.c \
   $(TOP)/src/lyrore_stats.h \
   $(TOP)/src/lyrore_pattern.c \
-  $(TOP)/src/lyrore_pattern.h
+  $(TOP)/src/lyrore_pattern.h \
+  $(TOP)/src/lyrore_hooks.c \
+  $(TOP)/src/lyrore_hooks.h \
+  $(TOP)/src/lyrore_plugin.c \
+  $(TOP)/src/lyrore_plugin.h
 
 # Source code for extensions
 #

@@ -7185,6 +7185,9 @@ case OP_LoadAnalysis: {
   assert( pOp->p1>=0 && pOp->p1<db->nDb );
   rc = sqlite3AnalysisLoad(db, pOp->p1);
   if( rc ) goto abort_due_to_error;
+#ifdef SQLITE_ENABLE_LYRORE
+  { extern void lyroreInvokeAnalyzeHooks(sqlite3*, int); lyroreInvokeAnalyzeHooks(db, pOp->p1); }
+#endif
   break; 
 }
 #endif /* !defined(SQLITE_OMIT_ANALYZE) */

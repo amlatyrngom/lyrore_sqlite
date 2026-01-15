@@ -437,6 +437,12 @@ set pragma_def {
   ARG:  SQLITE_LyrorePlanRL
   IF:   defined(SQLITE_ENABLE_LYRORE)
 
+
+  NAME: lyrore_plugins
+  TYPE: FLAG
+  ARG:  SQLITE_LyrorePlugins
+  IF:   defined(SQLITE_ENABLE_LYRORE)
+
   NAME: lyrore_reset
   TYPE: LYRORE_RESET
   FLAG: NoColumns

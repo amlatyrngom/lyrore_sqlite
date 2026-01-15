@@ -7736,6 +7736,10 @@ int sqlite3Select(
     goto select_end;
   }
   assert( db->mallocFailed==0 );
+#ifdef SQLITE_ENABLE_LYRORE
+  { extern int lyroreInvokePreOptHooks(sqlite3*, Parse*, Select*);
+    if( lyroreInvokePreOptHooks(db, pParse, p)!=SQLITE_OK ){ goto select_end; } }
+#endif
   assert( p->pEList!=0 );
 #if TREETRACE_ENABLED
   if( sqlite3TreeTrace & 0x10 ){

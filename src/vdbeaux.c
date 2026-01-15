@@ -3334,6 +3334,9 @@ int sqlite3VdbeHalt(Vdbe *p){
   }
   closeAllCursors(p);
   checkActiveVdbeCnt(db);
+#ifdef SQLITE_ENABLE_LYRORE
+  { extern void lyroreInvokePostQueryHooks(sqlite3*, Vdbe*); lyroreInvokePostQueryHooks(db, p); }
+#endif
 
   /* No commit or rollback needed if the program never started or if the
   ** SQL statement does not read or write a database file.  */

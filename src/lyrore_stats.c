@@ -21,6 +21,8 @@
 #include "lyrore_model.h"
 #include "lyrore_stats.h"
 #include "lyrore_pattern.h"
+#include "lyrore_hooks.h"
+#include "lyrore_plugin.h"
 
 /*
 ** Static flag to prevent recursive initialization when
@@ -62,6 +64,12 @@ static const char *azCreateStateTables[] = {
     "last_updated INTEGER, "
     "PRIMARY KEY(pattern_name, model_slot))",
 
+
+  "CREATE TABLE IF NOT EXISTS lyrore_plugins("
+    "name TEXT PRIMARY KEY, "
+    "path TEXT, "
+    "version INT, "
+    "loaded_at INT)",
   0  /* Sentinel */
 };
 
@@ -100,6 +108,9 @@ int lyroreInit(sqlite3 *db){
   lyroreInitPatternRegistry(&ctx->planPatterns);
   lyroreInitPatternRegistry(&ctx->exprPatterns);
 
+  /* Initialize hook arrays (Step 2) */
+  lyroreInitHooks(ctx);
+
   /* Get database path */
   zPath = sqlite3_db_filename(db, "main");
 
@@ -133,6 +144,11 @@ int lyroreInit(sqlite3 *db){
   db->pLyrore = ctx;
   db->flags |= SQLITE_LyroreEnabled;
 
+  /* Register lyrore_register() SQL function (Step 2) */
+  lyroreRegisterPluginFunction(db);
+  /* Register built-in hooks (UDF transformation, etc.) */
+  lyroreRegisterBuiltinHooks(db);
+
   return SQLITE_OK;
 }
 
@@ -162,6 +178,10 @@ void lyroreShutdown(sqlite3 *db){
   lyroreDestroyPatternRegistry(&ctx->costPatterns);
   lyroreDestroyPatternRegistry(&ctx->planPatterns);
   lyroreDestroyPatternRegistry(&ctx->exprPatterns);
+
+  /* Unload plugins and free hook arrays (Step 2) */
+  lyroreUnloadAllPlugins(db);
+  lyroreFreeHooks(ctx);
 
   /* Destroy all registered models */
   pEntry = ctx->pModels;
