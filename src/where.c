@@ -2835,7 +2835,7 @@ static int whereLoopInsert(WhereLoopBuilder *pBuilder, WhereLoop *pTemplate){
   }
   pBuilder->iPlanLimit--;
 #ifdef SQLITE_ENABLE_LYRORE
-  { extern void lyroreInvokeEstimateHooks(sqlite3*, WhereLoopBuilder*, WhereLoop*);
+  { extern void lyroreInvokeEstimateHooks(sqlite3*, void*, void*);
     lyroreInvokeEstimateHooks(db, pBuilder, pTemplate); }
 #endif
 

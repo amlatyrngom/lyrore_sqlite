@@ -1786,7 +1786,7 @@ struct sqlite3 {
   DbClientData *pDbData;        /* sqlite3_set_clientdata() content */
   u64 nSpill;                   /* TEMP content spilled to disk */
 #ifdef SQLITE_ENABLE_LYRORE
-  struct LyroreContext *pLyrore; /* Lyrore optimization context */
+  struct LyroreCppContext *pLyrore; /* Lyrore optimization context */
 #endif
 #ifdef SQLITE_ENABLE_UNLOCK_NOTIFY
   /* The following variables are all protected by the STATIC_MAIN

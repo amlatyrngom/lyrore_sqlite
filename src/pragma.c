@@ -13,7 +13,7 @@
 */
 #include "sqliteInt.h"
 #ifdef SQLITE_ENABLE_LYRORE
-#include "lyrore_stats.h"
+#include "lyrore_cabi.h"
 #endif
 
 #if !defined(SQLITE_ENABLE_LOCKING_STYLE)

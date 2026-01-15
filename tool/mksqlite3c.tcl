@@ -199,13 +199,8 @@ foreach hdr {
    vxworks.h
    wal.h
    whereInt.h
+   lyrore_cabi.h
    sqlite3recover.h
-   lyrore_model.h
-   lyrore_features.h
-   lyrore_stats.h
-   lyrore_pattern.h
-   lyrore_hooks.h
-   lyrore_plugin.h
 } {
   set available_hdr($hdr) 1
 }
@@ -468,12 +463,6 @@ set flist {
    whereexpr.c
    where.c
    window.c
-   lyrore_model.c
-   lyrore_features.c
-   lyrore_stats.c
-   lyrore_pattern.c
-   lyrore_hooks.c
-   lyrore_plugin.c
 
    parse.c
 
@@ -481,6 +470,7 @@ set flist {
    complete.c
 
    main.c
+   lyrore_cabi.c
    notify.c
 
    fts3.c

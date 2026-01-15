@@ -1,0 +1,11 @@
+--- main.mk.bak2
++++ main.mk
+@@ -1419,6 +1419,9 @@ utf.o:	$(TOP)/src/utf.c $(DEPS_OBJ_COMMON)
+ window.o:	$(TOP)/src/window.c $(DEPS_OBJ_COMMON)
+ 	$(T.cc.sqlite) -c $(TOP)/src/window.c
+ 
++lyrore_cabi.o:	$(TOP)/src/lyrore_cabi.c $(DEPS_OBJ_COMMON)
++	$(T.cc.sqlite) -c $(TOP)/src/lyrore_cabi.c
++
+ where.o:	$(TOP)/src/where.c $(DEPS_OBJ_COMMON)
+ 	$(T.cc.sqlite) -c $(TOP)/src/where.c

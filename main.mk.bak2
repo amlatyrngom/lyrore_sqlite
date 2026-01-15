@@ -52,12 +52,6 @@ B.cc ?= $(CC)
 #
 T.cc ?= $(B.cc)
 #
-# $(CXX) =
-#
-# C++ Compiler for Lyrore SDK components.
-#
-CXX ?= g++
-#
 # $(AR) =
 #
 # Tool used to build a static library from object files, without its
@@ -564,7 +558,7 @@ LIBOBJS0 = alter.o analyze.o attach.o auth.o \
          vdbetrace.o vdbevtab.o vtab.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
          window.o \
-         ly_expr.o cpp_context.o lyrore_cabi.o
+         lyrore_cabi.o
 LIBOBJS = $(LIBOBJS0)
 
 #
@@ -1437,17 +1431,6 @@ whereexpr.o:	$(TOP)/src/whereexpr.c $(DEPS_OBJ_COMMON)
 window.o:	$(TOP)/src/window.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) -c $(TOP)/src/window.c
 
-lyrore_cabi.o:	$(TOP)/src/lyrore_cabi.c $(DEPS_OBJ_COMMON)
-	$(T.cc.sqlite) -c $(TOP)/src/lyrore_cabi.c
-
-# C++ Lyrore SDK objects - compiled into SQLite for access to internal APIs
-ly_expr.o:	$(TOP)/ext/lyrore_sdk/src/ly_expr.cpp $(DEPS_OBJ_COMMON)
-	$(CXX) $(CFLAGS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/ly_expr.cpp
-
-cpp_context.o:	$(TOP)/ext/lyrore_sdk/src/cpp_context.cpp $(DEPS_OBJ_COMMON)
-	$(CXX) $(CFLAGS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/cpp_context.cpp
-
-
 tclsqlite.o:	$(T.tcl.env.sh) $(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
 	$(T.compile.tcl) -DUSE_TCL_STUBS=1 $$TCL_INCLUDE_SPEC \
 		-c $(TOP)/src/tclsqlite.c
@@ -1529,11 +1512,10 @@ all: lib
 
 #
 # Dynamic libsqlite3
-# Note: Uses CXX for linking due to Lyrore C++ SDK objects
 #
 $(libsqlite3.DLL):	$(LIBOBJ)
-	$(CXX) $(LDFLAGS.shlib) -o $@ $(LIBOBJ) $(LDFLAGS.libsqlite3) \
-		$(LDFLAGS.libsqlite3.os-specific) $(LDFLAGS.libsqlite3.soname) -lstdc++
+	$(T.link.shared) -o $@ $(LIBOBJ) $(LDFLAGS.libsqlite3) \
+		$(LDFLAGS.libsqlite3.os-specific) $(LDFLAGS.libsqlite3.soname)
 $(libsqlite3.DLL)-1: $(libsqlite3.DLL)
 $(libsqlite3.DLL)-0 $(libsqlite3.DLL)-:
 so: $(libsqlite3.DLL)-$(ENABLE_LIB_SHARED)

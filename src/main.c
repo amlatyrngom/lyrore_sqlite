@@ -17,8 +17,7 @@
 #include "sqliteInt.h"
 
 #ifdef SQLITE_ENABLE_LYRORE
-#include "lyrore_model.h"
-#include "lyrore_stats.h"
+#include "lyrore_cabi.h"
 #endif
 
 #ifdef SQLITE_ENABLE_FTS3

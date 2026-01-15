@@ -7737,7 +7737,7 @@ int sqlite3Select(
   }
   assert( db->mallocFailed==0 );
 #ifdef SQLITE_ENABLE_LYRORE
-  { extern int lyroreInvokePreOptHooks(sqlite3*, Parse*, Select*);
+  { extern int lyroreInvokePreOptHooks(sqlite3*, void*, void*);
     if( lyroreInvokePreOptHooks(db, pParse, p)!=SQLITE_OK ){ goto select_end; } }
 #endif
   assert( p->pEList!=0 );
