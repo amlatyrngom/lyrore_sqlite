@@ -42,7 +42,7 @@ fast_groupby.so: examples/fast_groupby.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
 
 # Test plugins
-tests: pattern_unit_test.so real_pattern_match_test.so custom_op_test.so
+tests: pattern_unit_test.so real_pattern_match_test.so custom_op_test.so storage_test.so
 
 pattern_unit_test.so: tests/pattern_unit_test.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
@@ -66,3 +66,6 @@ sqlite:
 	mkdir -p $(SQLITE_BUILD)
 	cd $(SQLITE_BUILD) && $(SQLITE_SRC)/../configure
 	cd $(SQLITE_BUILD) && $(MAKE) -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1 -DSQLITE_ENABLE_STMT_SCANSTATUS=1" "LDFLAGS=-rdynamic"
+
+storage_test.so: tests/storage_test.cpp
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<

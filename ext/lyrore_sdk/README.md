@@ -1,6 +1,6 @@
 # Lyrore C++ Plugin SDK
 
-A C++ SDK for SQLite query optimization plugins. Build plugins that transform queries, adjust cost estimates, collect statistics, and replace query subtrees with custom computation.
+A C++ SDK for SQLite query optimization plugins. Build plugins that transform queries, adjust cost estimates, collect statistics, replace query subtrees with custom computation, and implement custom storage backends.
 
 ## Quick Start
 
@@ -8,7 +8,7 @@ A C++ SDK for SQLite query optimization plugins. Build plugins that transform qu
 # Build SQLite with Lyrore (one-time)
 mkdir -p ~/sqlite_build && cd ~/sqlite_build
 ~/sqlite/configure
-make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1" "LDFLAGS=-rdynamic"
+make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1 -DSQLITE_ENABLE_PREUPDATE_HOOK=1" "LDFLAGS=-rdynamic"
 
 # Build plugins
 cd ~/sqlite/ext/lyrore_sdk && make
@@ -162,6 +162,83 @@ lyrore::register_custom_op<FastGroupByOp>(db,
 
 ---
 
+## Storage Customization
+
+Implement custom storage backends with full INSERT/UPDATE/DELETE support and ACID transactions.
+
+| Mode | Data Authority | Write Path | Use Case |
+|------|---------------|------------|----------|
+| `OWNED` | Plugin is source | xUpdate → on_update() | Columnar storage, custom indexes |
+| `REPLICATED` | Original table | preupdate_hook → on_update() | Materialized views, caches |
+
+### Storage Operator Example
+
+```cpp
+#include "lyrore_custom_op.hpp"
+
+class ColumnarStorage : public lyrore::StorageCustomOperator {
+    std::vector<int64_t> col_id_, col_cat_, col_qty_;
+    size_t pos_ = 0;
+
+public:
+    lyrore::StorageMode storage_mode() const override { return lyrore::StorageMode::OWNED; }
+    lyrore::OutputMode output_mode() const override { return lyrore::OutputMode::ITERATOR; }
+
+    int on_update(lyrore::UpdateOp op, int64_t old_rowid, int64_t new_rowid,
+                  const std::vector<lyrore::LyValue>&,
+                  const std::vector<lyrore::LyValue>& new_vals) override {
+        if (op == lyrore::UpdateOp::INSERT) {
+            col_id_.push_back(std::get<int64_t>(new_vals[0]));
+            col_cat_.push_back(std::get<int64_t>(new_vals[1]));
+            col_qty_.push_back(std::get<int64_t>(new_vals[2]));
+        }
+        return SQLITE_OK;
+    }
+
+    // Transaction hooks for ACID compliance
+    int on_sync() override { /* ensure durability */ return SQLITE_OK; }
+    void on_commit() override { /* finalize changes */ }
+    void on_rollback() override { /* revert changes */ }
+
+    // Iterator for reads
+    void iterator_reset() override { pos_ = 0; }
+    bool iterator_next() override { return ++pos_ <= col_id_.size(); }
+    std::vector<lyrore::LyValue> iterator_get_row() override {
+        return {lyrore::LyValue{col_id_[pos_-1]}, lyrore::LyValue{col_cat_[pos_-1]}, 
+                lyrore::LyValue{col_qty_[pos_-1]}};
+    }
+};
+
+// Register in onInit:
+lyrore::register_storage_op<ColumnarStorage>(db, "orders_col", {"id", "cat", "qty"});
+```
+
+### Transaction Hooks
+
+| Hook | Called | Purpose |
+|------|--------|---------|
+| `on_begin()` | Transaction start | Snapshot state |
+| `on_update()` | Each INSERT/UPDATE/DELETE | Apply changes |
+| `on_sync()` | Before commit | **Must ensure durability** |
+| `on_commit()` | Commit success | Finalize |
+| `on_rollback()` | Rollback | Revert to snapshot |
+
+### Function Registration for Triggers
+
+Register C++ functions with INNOCUOUS flag for safe use in triggers:
+
+```cpp
+#include "lyrore_function.hpp"
+
+int count = 0;
+lyrore::register_scalar_function<int64_t, int64_t>(db, "audit",
+    [&](int64_t id) { count++; return id; }, false, true);
+
+// SQL: CREATE TRIGGER t AFTER INSERT ON tbl BEGIN SELECT audit(NEW.id); END;
+```
+
+---
+
 ## Low-Level AST Manipulation
 
 For direct AST transformation, use `lyrore_cabi.h` wrappers:
@@ -212,13 +289,16 @@ ext/lyrore_sdk/
 ├── include/
 │   ├── lyrore_plugin.hpp     # Plugin base, contexts, LyValue
 │   ├── lyrore_pattern.hpp    # Pattern matching API
-│   └── lyrore_custom_op.hpp  # Custom operators API
+│   ├── lyrore_custom_op.hpp  # Custom operators + Storage API
+│   └── lyrore_function.hpp   # C++ function registration
 ├── src/                      # SDK implementation
 ├── examples/
 │   ├── histogram.cpp         # Cardinality estimation
 │   ├── udf_transform.cpp     # AST transformation
 │   └── fast_groupby.cpp      # Custom GROUP BY operator
-└── tests/                    # Test suite
+└── tests/
+    ├── custom_op_test.cpp    # Custom operator tests
+    └── storage_test.cpp      # Storage operator tests
 ```
 
 ## Examples
@@ -226,6 +306,7 @@ ext/lyrore_sdk/
 - **histogram.cpp** - Pattern-based histogram cardinality estimation
 - **udf_transform.cpp** - UDF to native expression transformation (30x+ speedup)
 - **fast_groupby.cpp** - Custom GROUP BY using ITERATOR mode
+- **storage_test.cpp** - Columnar storage with 30x+ GROUP BY speedup
 
 ---
 
@@ -246,7 +327,7 @@ rm -f ~/sqlite/ext/lyrore_sdk/*.so
 # STEP 2: Build SQLite with Lyrore
 # ============================================
 cd ~/sqlite_build
-make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1" "LDFLAGS=-rdynamic"
+make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1 -DSQLITE_ENABLE_PREUPDATE_HOOK=1" "LDFLAGS=-rdynamic"
 
 # ============================================
 # STEP 3: Build SDK plugins
@@ -261,70 +342,54 @@ cd ~/sqlite/ext/lyrore_sdk
 ~/sqlite_build/sqlite3 :memory: <<'EOF'
 PRAGMA lyrore_enabled=ON;
 PRAGMA lyrore_plugins=ON;
-SELECT lyrore_register('./custom_op_test.so');
-SELECT run_custom_op_tests();
+SELECT lyrore_register('./storage_test.so');
+SELECT run_storage_tests();
 EOF
 ```
 
 ### One-Liner for Full Rebuild & Test
 
 ```bash
-cd ~/sqlite_build && rm -f libsqlite3.so sqlite3 && make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1" "LDFLAGS=-rdynamic" && cd ~/sqlite/ext/lyrore_sdk && make clean && make && ~/sqlite_build/sqlite3 :memory: "PRAGMA lyrore_enabled=ON; PRAGMA lyrore_plugins=ON; SELECT lyrore_register('./custom_op_test.so'); SELECT run_custom_op_tests();"
+cd ~/sqlite_build && rm -f libsqlite3.so sqlite3 && make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1 -DSQLITE_ENABLE_PREUPDATE_HOOK=1" "LDFLAGS=-rdynamic" && cd ~/sqlite/ext/lyrore_sdk && make clean && make && ~/sqlite_build/sqlite3 :memory: "PRAGMA lyrore_enabled=ON; PRAGMA lyrore_plugins=ON; SELECT lyrore_register('./storage_test.so'); SELECT run_storage_tests();"
 ```
 
-### Run Test Suite
-
-Run the comprehensive test suite for custom operators:
+### Run Storage Test Suite
 
 ```bash
 cd ~/sqlite/ext/lyrore_sdk
 ~/sqlite_build/sqlite3 :memory: <<'EOF'
 PRAGMA lyrore_enabled=ON;
 PRAGMA lyrore_plugins=ON;
-SELECT lyrore_register('./custom_op_test.so');
-SELECT run_custom_op_tests();
+SELECT lyrore_register('./storage_test.so');
+SELECT run_storage_tests();
 EOF
 ```
 
 Expected output:
 ```
-=== Custom Operator Test Suite ===
-PASS: TableCursor basic operations work correctly
-PASS: TableCursor handles empty tables correctly
-...
+=== Storage Operator Test Suite ===
+PASS: Test 1: Basic CRUD operations
+PASS: Test 2: Transaction Rollback
+PASS: Test 3: Crash Recovery Detection
+PASS: Test 4: Performance (GROUP BY Speedup)
+PASS: Test 5: Replicated Mode Sync
+PASS: Test 6: Trigger Function
+=== Results: 6 passed, 0 failed ===
 ALL TESTS PASSED
 ```
 
-### E2E Demo: Fast GROUP BY
-
-Complete self-contained demo showing the SDK in action:
+### E2E Demo: Storage Operator
 
 ```bash
 cd ~/sqlite/ext/lyrore_sdk
 ~/sqlite_build/sqlite3 :memory: <<'EOF'
--- Enable Lyrore
 PRAGMA lyrore_enabled=ON;
 PRAGMA lyrore_plugins=ON;
 
--- Create test table with 10K rows
-CREATE TABLE orders(id INTEGER PRIMARY KEY, category_id INT, qty INT);
-WITH RECURSIVE cnt(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM cnt WHERE x<10000)
-INSERT INTO orders SELECT x, x%5, x*10 FROM cnt;
+-- Load storage test plugin
+SELECT lyrore_register('./storage_test.so');
 
--- Load the fast GROUP BY plugin
-SELECT lyrore_register('./fast_groupby.so');
-
--- Run GROUP BY query (uses custom operator)
-SELECT category_id, SUM(qty) FROM orders GROUP BY category_id;
+-- Run all storage tests
+SELECT run_storage_tests();
 EOF
 ```
-
-Expected output:
-```
-0|100050000
-1|99970000
-2|99990000
-3|100010000
-4|100030000
-```
-

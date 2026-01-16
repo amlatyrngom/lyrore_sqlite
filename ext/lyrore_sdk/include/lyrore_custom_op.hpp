@@ -166,6 +166,117 @@ void register_custom_op(sqlite3* db,
                         const std::vector<std::string>& output_columns);
 
 
+
+
+
+// ============================================================
+// Step 4: Storage Customization Additions
+// ============================================================
+
+/**
+ * StorageMode - How the storage operator handles data
+ */
+enum class StorageMode { 
+    OWNED,      // Virtual table IS the storage (xUpdate -> on_update)
+    REPLICATED  // Mirrors existing table (preupdate_hook -> on_update)
+};
+
+/**
+ * UpdateOp - Type of data modification
+ */
+enum class UpdateOp { INSERT, UPDATE, DELETE };
+
+
+/**
+ * VersionManager - Manages version tracking with shadow table persistence
+ * 
+ * Shadow table: <storage>_lyrore_version
+ * Used to detect crash-interrupted transactions on reconnect.
+ */
+class VersionManager {
+public:
+    VersionManager(sqlite3* db, const std::string& storage_name);
+    ~VersionManager();
+
+    // Create shadow table if not exists
+    void init();
+
+    // Get current version from DB shadow table
+    int64_t get_db_version();
+
+    // Increment and write version (called during on_sync)
+    void increment_version();
+
+    // Called on commit to finalize version
+    void commit_version();
+
+    // Called on rollback to restore previous version  
+    void rollback_version();
+
+    // Verify consistency - returns false if crash detected
+    bool verify_consistency(int64_t plugin_committed_version);
+
+    // Getters
+    int64_t get_committed_version() const;
+    int64_t get_current_version() const;
+
+private:
+    sqlite3* db_;
+    std::string table_name_;  // e.g., "orders_col_lyrore_version"
+    int64_t current_version_;
+    int64_t committed_version_;
+};
+
+
+/**
+ * StorageCustomOperator - Base for custom storage backends
+ * 
+ * OWNED mode: Virtual table IS the storage (xUpdate -> on_update)
+ * REPLICATED mode: Mirrors existing table (preupdate_hook -> on_update)
+ * 
+ * Transaction lifecycle:
+ *   on_begin()   - Called when transaction starts
+ *   on_update()  - Called for each INSERT/UPDATE/DELETE
+ *   on_sync()    - Called before commit (MUST ensure durability)
+ *   on_commit()  - Called on successful commit
+ *   on_rollback()- Called on rollback
+ */
+class StorageCustomOperator : public CustomOperator {
+public:
+    virtual ~StorageCustomOperator() = default;
+
+    // === Required ===
+    virtual StorageMode storage_mode() const = 0;
+    virtual std::string source_table() const { return ""; }  // For REPLICATED mode
+
+    // === Write Handling ===
+    virtual int on_update(
+        UpdateOp op,
+        int64_t old_rowid, int64_t new_rowid,
+        const std::vector<LyValue>& old_vals,
+        const std::vector<LyValue>& new_vals
+    ) = 0;
+
+    // === Transaction Lifecycle ===
+    virtual int on_begin() { return 0; }   // SQLITE_OK
+    virtual int on_sync() { return 0; }    // MUST ensure durability before returning
+    virtual void on_commit() {}
+    virtual void on_rollback() {}
+
+    // === Row ID for vtab operations ===
+    // Must return the rowid of the current row during iteration.
+    // Called by xRowid after iterator_next() returns true.
+    virtual int64_t get_current_rowid() const { return 0; }
+
+    // === ACID Version Tracking ===
+    virtual int64_t get_committed_version() const { return 0; }
+    virtual void set_version(int64_t v) { (void)v; }
+    virtual void verify_consistency(int64_t db_version) { (void)db_version; }
+
+    // Check if this is a storage operator
+    bool is_storage_operator() const { return true; }
+};
+
 // ============================================================
 // Internal Implementation Details
 // ============================================================
@@ -174,6 +285,7 @@ void register_custom_op(sqlite3* db,
  * CustomOpEntry - Internal storage for registered operators
  */
 struct CustomOpEntry {
+    virtual ~CustomOpEntry() = default;
     std::shared_ptr<pattern::Pattern> pattern;
     std::function<std::unique_ptr<CustomOperator>()> factory;
     std::vector<std::string> output_columns;
@@ -229,6 +341,70 @@ int rewrite_custom_ops(PreOptContext& ctx);
 LyValue sqlite3_value_to_lyvalue(void* value);
 void set_sqlite3_result(void* ctx, const LyValue& val);
 
+// ============================================================
+// Step 4: Storage Customization - Types and Declarations
+// ============================================================
+
+/**
+ * StorageOpEntry - Internal storage for registered storage operators
+ * Extends CustomOpEntry with storage-specific fields.
+ */
+struct StorageOpEntry : public CustomOpEntry {
+    StorageMode storage_mode_val;
+    std::string source_table_name;  // For REPLICATED mode
+    std::unique_ptr<StorageCustomOperator> persistent_instance;
+    std::unique_ptr<VersionManager> version_manager;  // Shadow table version tracking
+
+    StorageOpEntry() : CustomOpEntry(), storage_mode_val(StorageMode::OWNED) {}
+};
+
+// Forward declaration for storage vtab registration
+void register_storage_vtab_wrapper(sqlite3* db, StorageOpEntry* entry);
+
+/**
+ * PreupdateRouter - Routes preupdate hooks to REPLICATED storage operators
+ */
+class PreupdateRouter {
+public:
+    static PreupdateRouter& instance();
+
+    // Register a storage operator for REPLICATED mode
+    void register_replica(sqlite3* db, const std::string& source_table, StorageOpEntry* entry);
+
+    // Unregister when connection closes
+    void unregister_db(sqlite3* db);
+
+    // Get entry for a source table (called from hook)
+    StorageOpEntry* find_by_source(sqlite3* db, const char* table_name);
+
+    // Static callback for sqlite3_preupdate_hook
+    static void preupdate_hook_callback(
+        void* pCtx,
+        sqlite3* db,
+        int op,
+        const char* zDb,
+        const char* zTable,
+        sqlite3_int64 oldRowid,
+        sqlite3_int64 newRowid
+    );
+
+private:
+    PreupdateRouter() = default;
+    // Map: db -> (source_table -> entry)
+    std::map<sqlite3*, std::map<std::string, StorageOpEntry*>> replicas_;
+};
+
+/**
+ * Registration API for Storage Operators - call from plugin onInit()
+ * 
+ * Example:
+ *   register_storage_op<ColumnarStorage>(db, "orders_col", {"id", "cat", "qty"});
+ */
+template<typename OpClass>
+void register_storage_op(sqlite3* db, 
+                         const std::string& name,
+                         const std::vector<std::string>& cols);
+
 
 // Template implementation
 template<typename OpClass>
@@ -266,6 +442,55 @@ void register_custom_op(sqlite3* db,
     }
 }
 
+
+// ============================================================
+// Step 4: Storage Operator Registration Template Implementation  
+// ============================================================
+
+template<typename OpClass>
+void register_storage_op(sqlite3* db, 
+                         const std::string& name,
+                         const std::vector<std::string>& cols) {
+    // Create storage-specific entry
+    auto entry = std::make_unique<StorageOpEntry>();
+    entry->db = db;
+    entry->output_columns = cols;
+    entry->vtab_name = name;
+
+    // Create persistent instance (storage operators persist across queries)
+    auto instance = std::make_unique<OpClass>();
+    entry->mode = instance->output_mode();
+    entry->storage_mode_val = instance->storage_mode();
+
+    if (entry->storage_mode_val == StorageMode::REPLICATED) {
+        entry->source_table_name = instance->source_table();
+    }
+
+    // Store the persistent instance
+    entry->persistent_instance = std::move(instance);
+    entry->persistent_instance->_set_db(db);
+
+    // Factory is not used for storage ops (we use persistent_instance)
+    entry->factory = nullptr;
+
+    auto& registry = CustomOpRegistry::for_db(db);
+
+    // Register in registry - get stable pointer
+    // Use static_cast since we know the entry is a StorageOpEntry
+    StorageOpEntry* stable_ptr = static_cast<StorageOpEntry*>(
+        registry.register_op(std::unique_ptr<CustomOpEntry>(entry.release()))
+    );
+
+    // Register with appropriate wrapper based on storage mode
+    if (stable_ptr->storage_mode_val == StorageMode::OWNED) {
+        register_storage_vtab_wrapper(db, stable_ptr);
+    } else {
+        // REPLICATED mode: register with preupdate hook router
+        PreupdateRouter::instance().register_replica(db, stable_ptr->source_table_name, stable_ptr);
+        // Also register vtab for query rewriting
+        register_storage_vtab_wrapper(db, stable_ptr);
+    }
+}
 
 } // namespace lyrore
 
