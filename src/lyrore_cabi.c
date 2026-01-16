@@ -197,6 +197,10 @@ int lyrore_sqlite3StrICmp(const char* zLeft, const char* zRight){
   return sqlite3StrICmp(zLeft, zRight);
 }
 
+char* lyrore_sqlite3DbStrDup(sqlite3* db, const char* z){
+  return sqlite3DbStrDup(db, z);
+}
+
 LogEst_wrapper lyrore_sqlite3LogEst(u64_wrapper x){
   return (LogEst_wrapper)sqlite3LogEst((u64)x);
 }
@@ -205,4 +209,54 @@ u64_wrapper lyrore_sqlite3LogEstToInt(LogEst_wrapper x){
   return (u64_wrapper)sqlite3LogEstToInt((LogEst)x);
 }
 
+
+/* SrcList wrapper functions */
+SrcList* lyrore_sqlite3SrcListAppend(Parse* pParse, SrcList* pList, 
+                                     Token* pTable, Token* pDatabase){
+  return sqlite3SrcListAppend(pParse, pList, pTable, pDatabase);
+}
+
+void lyrore_sqlite3SrcListDelete(sqlite3* db, SrcList* pList){
+  sqlite3SrcListDelete(db, pList);
+}
+
+
+/* Additional functions for AST rewrite support */
+Table* lyrore_sqlite3FindTable(sqlite3* db, const char* zName, const char* zDatabase){
+  return sqlite3FindTable(db, zName, zDatabase);
+}
+
+void lyrore_sqlite3SrcListAssignCursors(Parse* pParse, SrcList* pList){
+  sqlite3SrcListAssignCursors(pParse, pList);
+}
+
+int lyrore_get_parse_nTab(Parse* pParse){
+  return pParse ? pParse->nTab : 0;
+}
+
 #endif /* SQLITE_ENABLE_LYRORE */
+
+void* lyrore_sqlite3DbMallocZero(sqlite3* db, u64 n){
+  return sqlite3DbMallocZero(db, n);
+}
+
+/* Debug function to dump schema tables */
+void lyrore_debug_dump_schema(sqlite3* db) {
+#ifdef SQLITE_ENABLE_LYRORE
+    fprintf(stderr, "[SCHEMA_DUMP] db=%p, nDb=%d\n", (void*)db, db ? db->nDb : -1);
+    if (!db) return;
+    for (int i = 0; i < db->nDb; i++) {
+        fprintf(stderr, "[SCHEMA_DUMP] db[%d].zDbSName=%s\n", i, 
+                db->aDb[i].zDbSName ? db->aDb[i].zDbSName : "(null)");
+        if (db->aDb[i].pSchema && db->aDb[i].pSchema->tblHash.count > 0) {
+            HashElem *elem;
+            for (elem = db->aDb[i].pSchema->tblHash.first; elem; elem = elem->next) {
+                Table* pTab = (Table*)elem->data;
+                fprintf(stderr, "[SCHEMA_DUMP]   table: %s (virtual=%d)\n", 
+                        pTab->zName ? pTab->zName : "(null)",
+                        pTab->eTabType == TABTYP_VTAB ? 1 : 0);
+            }
+        }
+    }
+#endif
+}

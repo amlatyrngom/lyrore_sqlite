@@ -564,13 +564,13 @@ LIBOBJS0 = alter.o analyze.o attach.o auth.o \
          vdbetrace.o vdbevtab.o vtab.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
          window.o \
-         cpp_context.o pattern.o lyrore_cabi.o
+         cpp_context.o pattern.o table_cursor.o custom_op_registry.o scalar_wrapper.o vtab_wrapper.o ast_rewrite.o ly_expr.o lyrore_cabi.o
 LIBOBJS = $(LIBOBJS0)
 
 #
 # Object files for the amalgamation.
 #
-LIBOBJS1 = sqlite3.o cpp_context.o pattern.o
+LIBOBJS1 = sqlite3.o cpp_context.o pattern.o table_cursor.o custom_op_registry.o scalar_wrapper.o vtab_wrapper.o ast_rewrite.o ly_expr.o
 
 #
 # Determine the real value of LIBOBJ based on whether the amalgamation
@@ -1447,6 +1447,24 @@ cpp_context.o:	$(TOP)/ext/lyrore_sdk/src/cpp_context.cpp $(DEPS_OBJ_COMMON)
 
 pattern.o:	$(TOP)/ext/lyrore_sdk/src/pattern.cpp $(DEPS_OBJ_COMMON)
 	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/pattern.cpp
+
+table_cursor.o:	$(TOP)/ext/lyrore_sdk/src/table_cursor.cpp $(DEPS_OBJ_COMMON)
+	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/table_cursor.cpp
+
+custom_op_registry.o:	$(TOP)/ext/lyrore_sdk/src/custom_op_registry.cpp $(DEPS_OBJ_COMMON)
+	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/custom_op_registry.cpp
+
+scalar_wrapper.o:	$(TOP)/ext/lyrore_sdk/src/scalar_wrapper.cpp $(DEPS_OBJ_COMMON)
+	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/scalar_wrapper.cpp
+
+vtab_wrapper.o:	$(TOP)/ext/lyrore_sdk/src/vtab_wrapper.cpp $(DEPS_OBJ_COMMON)
+	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/vtab_wrapper.cpp
+
+ast_rewrite.o:	$(TOP)/ext/lyrore_sdk/src/ast_rewrite.cpp $(DEPS_OBJ_COMMON)
+	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/ast_rewrite.cpp
+
+ly_expr.o:	$(TOP)/ext/lyrore_sdk/src/ly_expr.cpp $(DEPS_OBJ_COMMON)
+	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/ly_expr.cpp
 
 
 tclsqlite.o:	$(T.tcl.env.sh) $(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)

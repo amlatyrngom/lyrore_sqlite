@@ -8,6 +8,7 @@
 #include "lyrore_plugin.hpp"
 #include "lyrore_cabi.h"
 #include "lyrore_pattern.hpp"
+#include "lyrore_custom_op.hpp"
 #include <dlfcn.h>
 #include <vector>
 #include <string>
@@ -67,15 +68,36 @@ int EstimateContext::num_where_terms() const {
 }
 
 // Get a specific WHERE term as raw Expr* by index
-Expr* EstimateContext::get_where_term(int index) const {
+LyExprPtr EstimateContext::get_where_term(int index) const {
+    WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
+    if (!builder || !builder->pWC) return nullptr;
+    if (index < 0 || index >= builder->pWC->nTerm) return nullptr;
+    return LyExpr::from_sqlite(builder->pWC->a[index].pExpr);
+}
+
+// Get all WHERE terms as LyExpr vector
+std::vector<LyExprPtr> EstimateContext::get_where_terms() const {
+    std::vector<LyExprPtr> terms;
+    WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
+    if (!builder || !builder->pWC) return terms;
+    for (int i = 0; i < builder->pWC->nTerm; i++) {
+        Expr* pExpr = builder->pWC->a[i].pExpr;
+        if (pExpr) {
+            terms.push_back(LyExpr::from_sqlite(pExpr));
+        }
+    }
+    return terms;
+}
+
+// Raw Expr* access for Pattern API
+Expr* EstimateContext::get_where_term_raw(int index) const {
     WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
     if (!builder || !builder->pWC) return nullptr;
     if (index < 0 || index >= builder->pWC->nTerm) return nullptr;
     return builder->pWC->a[index].pExpr;
 }
 
-// Get all WHERE terms as raw Expr* vector
-std::vector<Expr*> EstimateContext::get_where_terms() const {
+std::vector<Expr*> EstimateContext::get_where_terms_raw() const {
     std::vector<Expr*> terms;
     WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
     if (!builder || !builder->pWC) return terms;
@@ -182,9 +204,14 @@ struct LyroreCppContext {
         lyrore_pattern_capture_preopt(pSelect);
 
         lyrore::PreOptContext ctx(db, pParse, pSelect);
+        
+        // First, invoke plugin hooks
         for (auto& entry : plugins) {
             entry->plugin->onPreOpt(ctx);
         }
+        
+        // Then, perform custom operator AST rewrites
+        lyrore::rewrite_custom_ops(ctx);
     }
 
     void invoke_estimate(void* pBuilder, void* pLoop) {
@@ -240,7 +267,9 @@ struct LyroreCppContext {
 namespace lyrore {
 
 void Plugin::set_template_match(Select* sel, int template_id, 
-                               const std::map<std::string, LyValue>& params) {
+                               const std::map<std::string, LyValue>& params,
+                               const std::map<std::string, LyExprPtr>& expr_params) {
+    (void)expr_params;  // TODO: Store expr_params if needed
     if (!context_) return;
     context_->set_query_state(sel, template_id, params);
 }
@@ -272,6 +301,11 @@ LyroreCppContext* lyrore_cpp_create(sqlite3* db) {
 }
 
 void lyrore_cpp_destroy(LyroreCppContext* ctx) {
+    if (!ctx) return;
+    // Clean up CustomOpRegistry for this connection BEFORE deleting ctx
+    // This ensures the registry (with std::function stored in plugin) is cleaned 
+    // while the plugin is still loaded
+    lyrore::CustomOpRegistry::cleanup(ctx->db);
     delete ctx;
 }
 

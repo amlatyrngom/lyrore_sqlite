@@ -27,7 +27,7 @@ all: examples tests
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
 
 # Example plugins
-examples: udf_transform.so histogram.so pattern_e2e_test.so product_filter_udf.so
+examples: udf_transform.so histogram.so pattern_e2e_test.so product_filter_udf.so fast_groupby.so
 
 udf_transform.so: examples/udf_transform.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
@@ -38,13 +38,19 @@ histogram.so: examples/histogram.cpp
 pattern_e2e_test.so: examples/pattern_e2e_test.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
 
+fast_groupby.so: examples/fast_groupby.cpp
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
+
 # Test plugins
-tests: pattern_unit_test.so real_pattern_match_test.so
+tests: pattern_unit_test.so real_pattern_match_test.so custom_op_test.so
 
 pattern_unit_test.so: tests/pattern_unit_test.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
 
 real_pattern_match_test.so: tests/real_pattern_match_test.cpp
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
+
+custom_op_test.so: tests/custom_op_test.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
 
 # UDF for testing

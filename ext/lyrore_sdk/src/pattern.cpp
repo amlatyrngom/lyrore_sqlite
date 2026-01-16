@@ -1,6 +1,6 @@
 /*
 ** Lyrore Pattern Engine Implementation
-** 
+**
 ** Provides SQL-based pattern matching for query templates.
 ** Uses SQLite's parser for pattern specification.
 */
@@ -41,7 +41,7 @@ Pattern::~Pattern() {
     }
 }
 
-Pattern::Pattern(Pattern&& other) noexcept 
+Pattern::Pattern(Pattern&& other) noexcept
     : db_(other.db_),
       pending_sql_(std::move(other.pending_sql_)),
       init_state_(other.init_state_.load()),
@@ -96,6 +96,7 @@ PatternPtr Pattern::from_where_expr(sqlite3* db, const char* sql) {
 }
 
 bool Pattern::try_initialize() const {
+
     // Fast path: already completed
     InitState state = init_state_.load(std::memory_order_acquire);
     if (state == InitState::COMPLETED) {
@@ -124,14 +125,17 @@ bool Pattern::try_initialize() const {
 }
 
 void Pattern::do_initialize() const {
+
     if (pending_sql_.empty() || !db_) {
         init_failed_ = true;
+
         return;
     }
 
     // Recursion guard
     if (pattern_init_depth > 5) {
         init_failed_ = true;
+
         return;
     }
 
@@ -158,22 +162,35 @@ void Pattern::do_initialize() const {
     if (stmt) sqlite3_finalize(stmt);
 
     if (rc != SQLITE_OK || !dupped) {
+
         if (dupped && db_) {
             lyrore_sqlite3SelectDelete(db_, dupped);
         }
+
+        // Check if failure is due to missing table/column - allow retry in that case
+        const char* errmsg = sqlite3_errmsg(db_);
+        if (errmsg && (strstr(errmsg, "no such table") || strstr(errmsg, "no such column"))) {
+            // Don't mark as permanently failed - allow retry
+
+            init_state_.store(InitState::NOT_STARTED, std::memory_order_release);
+            return;
+        }
+
         init_failed_ = true;
+
         return;
     }
-
     // Take ownership of the dupped Select*
     pattern_select_ = dupped;
     pattern_where_ = pattern_select_->pWhere;
+
     indexParameters();
 
     init_failed_ = false;
 }
 
 bool Pattern::is_valid() const {
+
     if (in_pattern_init()) {
         return false;
     }
@@ -270,10 +287,10 @@ bool Pattern::matchSelect(const Select* pPattern, const Select* pQuery, MatchRes
     if (!pPattern && !pQuery) return true;
     if (!pPattern || !pQuery) return false;
 
-    if (!matchFromClause(pPattern->pSrc, pQuery->pSrc, result)) return false;
-    if (!matchExprList(pPattern->pEList, pQuery->pEList, result)) return false;
-    if (!matchExpr(pPattern->pWhere, pQuery->pWhere, result)) return false;
-    if (!matchExprList(pPattern->pGroupBy, pQuery->pGroupBy, result)) return false;
+    if (!matchFromClause(pPattern->pSrc, pQuery->pSrc, result)) { return false; }
+    if (!matchExprList(pPattern->pEList, pQuery->pEList, result)) { return false; }
+    if (!matchExpr(pPattern->pWhere, pQuery->pWhere, result)) { return false; }
+    if (!matchExprList(pPattern->pGroupBy, pQuery->pGroupBy, result)) { return false; }
     if (!matchExpr(pPattern->pHaving, pQuery->pHaving, result)) return false;
     if (!matchExprList(pPattern->pOrderBy, pQuery->pOrderBy, result)) return false;
     if (!matchExpr(pPattern->pLimit, pQuery->pLimit, result)) return false;
@@ -290,8 +307,26 @@ bool Pattern::matchFromClause(const SrcList* pPattern, const SrcList* pQuery, Ma
         const SrcItem* pP = &pPattern->a[i];
         const SrcItem* pQ = &pQuery->a[i];
 
-        // Table identity via schema pointer
-        if (pP->pSTab != pQ->pSTab) return false;
+        // Table identity: try schema pointer first, then fall back to name comparison
+        // Pointer comparison can fail when pattern and query resolve to different Table* instances
+
+        bool tablesMatch = false;
+        if (pP->pSTab == pQ->pSTab) {
+            // Pointer match - definitely same table
+            tablesMatch = true;
+
+        } else if (pP->pSTab && pQ->pSTab && pP->pSTab->zName && pQ->pSTab->zName) {
+            // Fall back to name comparison (case-insensitive)
+            if (lyrore_sqlite3StrICmp(pP->pSTab->zName, pQ->pSTab->zName) == 0) {
+                tablesMatch = true;
+
+            }
+        }
+
+        if (!tablesMatch) {
+
+            return false;
+        }
 
         // Join type must match
         if (pP->fg.jointype != pQ->fg.jointype) return false;
@@ -311,11 +346,21 @@ bool Pattern::matchFromClause(const SrcList* pPattern, const SrcList* pQuery, Ma
 
 bool Pattern::matchExprList(const ExprList* pPattern, const ExprList* pQuery, MatchResult& result) const {
     if (!pPattern && !pQuery) return true;
-    if (!pPattern || !pQuery) return false;
-    if (pPattern->nExpr != pQuery->nExpr) return false;
+    if (!pPattern || !pQuery) {
+
+        return false;
+    }
+    if (pPattern->nExpr != pQuery->nExpr) {
+
+        return false;
+    }
 
     for (int i = 0; i < pPattern->nExpr; i++) {
-        if (!matchExpr(pPattern->a[i].pExpr, pQuery->a[i].pExpr, result)) return false;
+
+        if (!matchExpr(pPattern->a[i].pExpr, pQuery->a[i].pExpr, result)) {
+
+            return false;
+        }
     }
     return true;
 }
@@ -332,10 +377,29 @@ bool Pattern::matchExpr(const Expr* pPattern, const Expr* pQuery, MatchResult& r
     // Operator must match
     if (pPattern->op != pQuery->op) return false;
 
-    // Column matching: use schema pointers
+    // Column matching: use schema pointers with name fallback
     if (pPattern->op == TK_COLUMN) {
-        return (pPattern->y.pTab == pQuery->y.pTab &&
-                pPattern->iColumn == pQuery->iColumn);
+
+        // Column index must match
+        if (pPattern->iColumn != pQuery->iColumn) {
+
+            return false;
+        }
+
+        // Table identity: try pointer first, then name
+        if (pPattern->y.pTab == pQuery->y.pTab) {
+
+            return true;  // Pointer match
+        }
+        if (pPattern->y.pTab && pQuery->y.pTab &&
+            pPattern->y.pTab->zName && pQuery->y.pTab->zName) {
+            // Fall back to name comparison (case-insensitive)
+            bool nameMatch = lyrore_sqlite3StrICmp(pPattern->y.pTab->zName, pQuery->y.pTab->zName) == 0;
+
+            return nameMatch;
+        }
+
+        return false;  // No match
     }
 
     // Function: name must match

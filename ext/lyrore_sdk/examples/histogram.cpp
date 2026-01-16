@@ -58,7 +58,7 @@ public:
         if (ctx.table_name() != "products") return;
 
         // Get WHERE clause terms (raw Expr*) and match against pattern
-        auto terms = ctx.get_where_terms();
+        auto terms = ctx.get_where_terms_raw();
         for (Expr* term : terms) {
             if (auto m = pattern_->match_expr(term)) {
                 // Pattern matched! Extract threshold from $1

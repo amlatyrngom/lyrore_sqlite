@@ -73,6 +73,18 @@ struct ExprList* lyrore_sqlite3ExprListAppend(struct Parse* pParse,
                                               struct Expr* pExpr);
 void lyrore_sqlite3ExprListDelete(sqlite3* db, struct ExprList* pList);
 
+
+/* SrcList functions */
+struct SrcList;
+struct SrcList* lyrore_sqlite3SrcListAppend(struct Parse* pParse, 
+                                            struct SrcList* pList,
+                                            struct Token* pTable,
+                                            struct Token* pDatabase);
+void lyrore_sqlite3SrcListDelete(sqlite3* db, struct SrcList* pList);
+
+/* Token struct (simplified) */
+struct Token;
+
 /* Select functions */
 struct Select* lyrore_sqlite3SelectDup(sqlite3* db, struct Select* pSelect, int flags);
 void lyrore_sqlite3SelectDelete(sqlite3* db, struct Select* pSelect);
@@ -80,10 +92,19 @@ void lyrore_sqlite3SelectDelete(sqlite3* db, struct Select* pSelect);
 /* Utility functions */
 void lyrore_sqlite3DbFree(sqlite3* db, void* p);
 int lyrore_sqlite3StrICmp(const char* zLeft, const char* zRight);
+char* lyrore_sqlite3DbStrDup(sqlite3* db, const char* z);
 
 /* LogEst conversion functions */
 LogEst_wrapper lyrore_sqlite3LogEst(u64_wrapper x);
 u64_wrapper lyrore_sqlite3LogEstToInt(LogEst_wrapper x);
+
+
+/* Additional functions for AST rewrite support */
+struct Table* lyrore_sqlite3FindTable(sqlite3* db, const char* zName, const char* zDatabase);
+void lyrore_sqlite3SrcListAssignCursors(struct Parse* pParse, struct SrcList* pList);
+int lyrore_get_parse_nTab(struct Parse* pParse);
+void* lyrore_sqlite3DbMallocZero(sqlite3* db, u64 n);
+void lyrore_debug_dump_schema(sqlite3* db);
 
 #endif /* SQLITE_ENABLE_LYRORE */
 
