@@ -6,7 +6,6 @@
 */
 
 #include "lyrore_plugin.hpp"
-#include "lyrore_cabi.h"
 #include "lyrore_pattern.hpp"
 #include <dlfcn.h>
 #include <vector>
@@ -43,13 +42,13 @@ std::string EstimateContext::table_name() const {
 int64_t EstimateContext::cardinality() const {
     WhereLoop* loop = static_cast<WhereLoop*>(loop_);
     // nOut is LogEst (log2(x) * 10)
-    return lyrore_sqlite3LogEstToInt(loop->nOut);
+    return sqlite3LogEstToInt(loop->nOut);
 }
 
 void EstimateContext::set_cardinality(int64_t rows) {
     WhereLoop* loop = static_cast<WhereLoop*>(loop_);
     if (rows < 1) rows = 1;
-    loop->nOut = lyrore_sqlite3LogEst(static_cast<u64>(rows));
+    loop->nOut = sqlite3LogEst(static_cast<u64>(rows));
 }
 
 bool EstimateContext::is_full_scan() const {

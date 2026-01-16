@@ -3,7 +3,6 @@
 #
 # IMPORTANT: Plugins do NOT include SDK sources (ly_expr.cpp, cpp_context.cpp).
 # These are compiled into libsqlite3.so and symbols are resolved at runtime.
-# However, plugins DO need access to SQLite headers for type definitions.
 
 # Configuration - adjust paths as needed
 SQLITE_SRC ?= $(HOME)/sqlite/src
@@ -15,22 +14,20 @@ SDK_SRC := $(SDK_DIR)src
 # Compiler settings
 CXX ?= g++
 CXXFLAGS := -std=c++17 -fPIC -O2 -Wall -Wextra
-# Include paths: SDK header, SQLite source (for sqliteInt.h), SQLite build (for generated headers)
 CXXFLAGS += -I$(SDK_INCLUDE) -I$(SQLITE_SRC) -I$(SQLITE_BUILD)
 LDFLAGS := -shared -ldl
 
 # Default target
-.PHONY: all clean examples
+.PHONY: all clean examples tests
 
-all: examples
+all: examples tests
 
-# Build a plugin: make myplugin.so PLUGIN_SRC=myplugin.cpp
-# Plugins compile their own code - SDK symbols are resolved from libsqlite3.so
+# Plugin build rule
 %.so: %.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
 
-# Example plugins - only compile plugin code, not SDK sources
-examples: udf_transform.so histogram.so passthrough_test.so
+# Example plugins
+examples: udf_transform.so histogram.so passthrough_test.so pattern_e2e_test.so
 
 udf_transform.so: examples/udf_transform.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
@@ -40,6 +37,21 @@ histogram.so: examples/histogram.cpp
 
 passthrough_test.so: examples/passthrough_test.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
+
+pattern_e2e_test.so: examples/pattern_e2e_test.cpp
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
+
+# Test plugins
+tests: pattern_unit_test.so
+
+pattern_unit_test.so: tests/pattern_unit_test.cpp
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
+
+# UDF for testing
+product_filter_udf.so: product_filter_udf.c
+	gcc -fPIC -shared -O2 -I$(SQLITE_BUILD) -o $@ $<
+
+examples: product_filter_udf.so
 
 clean:
 	rm -f *.so
@@ -52,8 +64,11 @@ sqlite:
 
 .PHONY: sqlite
 
-# UDF for testing
-product_filter_udf.so: product_filter_udf.c
-	gcc -fPIC -shared -O2 -I$(SQLITE_BUILD) -o $@ $<
+pattern_match_verify_test.so: tests/pattern_match_verify_test.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -shared -ldl -o $@ $<
 
-examples: udf_transform.so histogram.so passthrough_test.so product_filter_udf.so
+# Real pattern match test (actually tests matching!)
+real_pattern_match_test.so: tests/real_pattern_match_test.cpp
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
+
+tests: pattern_unit_test.so real_pattern_match_test.so

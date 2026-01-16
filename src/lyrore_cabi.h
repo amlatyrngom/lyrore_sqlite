@@ -1,13 +1,28 @@
 /*
 ** Lyrore C ABI Interface
 ** 
-** Minimal C glue (~100 LOC) for integrating C++ plugin SDK with SQLite.
+** Minimal C glue for integrating C++ plugin SDK with SQLite.
 ** This is the only Lyrore C code that needs to live inside SQLite.
 */
 #ifndef SQLITE_LYRORE_CABI_H
 #define SQLITE_LYRORE_CABI_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifdef SQLITE_ENABLE_LYRORE
+
+/* Forward declarations for types used in wrappers */
+struct Expr;
+struct ExprList;
+struct Select;
+struct Parse;
+struct sqlite3;
+
+/* Use numeric type aliases that don't require sqliteInt.h */
+typedef unsigned long long u64_wrapper;
+typedef short LogEst_wrapper;
 
 /* Opaque pointer to C++ context */
 typedef struct LyroreCppContext LyroreCppContext;
@@ -25,27 +40,55 @@ void lyrore_cpp_invoke_estimate(LyroreCppContext* ctx, void* pBuilder, void* pLo
 void lyrore_cpp_invoke_analyze(LyroreCppContext* ctx, int iDb);
 void lyrore_cpp_invoke_postquery(LyroreCppContext* ctx, void* pVdbe);
 
-/* 
-** SQL function to register plugins:
-**   SELECT lyrore_register('/path/to/plugin.so');
-*/
+/* SQL function to register plugins */
 void lyrore_register_functions(sqlite3* db);
 
 /* Context lifecycle - called from main.c */
 int lyroreInit(sqlite3 *db);
 void lyroreShutdown(sqlite3 *db);
 
-/* State management - called from pragma.c */
+/* State management */
 void lyrorePersistNow(sqlite3 *db);
 void lyroreReset(sqlite3 *db);
 
-/* Hook wrappers - called from hook integration points 
-** Note: Use void* for internal types that may not be visible in all contexts
-*/
+/* Hook wrappers - called from hook integration points */
 int lyroreInvokePreOptHooks(sqlite3 *db, void *pParse, void *pSelect);
 void lyroreInvokeEstimateHooks(sqlite3 *db, void *pBuilder, void *pLoop);
 void lyroreInvokeAnalyzeHooks(sqlite3 *db, int iDb);
 void lyroreInvokePostQueryHooks(sqlite3 *db, void *pVdbe);
 
+/* ============================================================
+** Internal SQLite Function Wrappers
+** These provide C++ SDK access to SQLITE_PRIVATE functions
+** ============================================================ */
+
+/* Expression functions */
+struct Expr* lyrore_sqlite3Expr(sqlite3* db, int op, const char* zToken);
+struct Expr* lyrore_sqlite3ExprDup(sqlite3* db, struct Expr* pExpr, int dupFlags);
+void lyrore_sqlite3ExprDelete(sqlite3* db, struct Expr* pExpr);
+
+/* ExprList functions */
+struct ExprList* lyrore_sqlite3ExprListAppend(struct Parse* pParse, 
+                                              struct ExprList* pList, 
+                                              struct Expr* pExpr);
+void lyrore_sqlite3ExprListDelete(sqlite3* db, struct ExprList* pList);
+
+/* Select functions */
+struct Select* lyrore_sqlite3SelectDup(sqlite3* db, struct Select* pSelect, int flags);
+void lyrore_sqlite3SelectDelete(sqlite3* db, struct Select* pSelect);
+
+/* Utility functions */
+void lyrore_sqlite3DbFree(sqlite3* db, void* p);
+int lyrore_sqlite3StrICmp(const char* zLeft, const char* zRight);
+
+/* LogEst conversion functions */
+LogEst_wrapper lyrore_sqlite3LogEst(u64_wrapper x);
+u64_wrapper lyrore_sqlite3LogEstToInt(LogEst_wrapper x);
+
 #endif /* SQLITE_ENABLE_LYRORE */
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* SQLITE_LYRORE_CABI_H */

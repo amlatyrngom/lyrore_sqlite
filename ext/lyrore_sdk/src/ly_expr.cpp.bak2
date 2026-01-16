@@ -6,7 +6,6 @@
 */
 
 #include "lyrore_plugin.hpp"
-#include "lyrore_cabi.h"
 #include <stdexcept>
 #include <sstream>
 
@@ -123,10 +122,10 @@ Expr* LyExpr::to_sqlite_new(Parse* pParse) const {
         case TK_COLUMN:
             // CRITICAL: Use sqlite3ExprDup to preserve Table* binding
             if (sqlite_expr) {
-                pNew = lyrore_sqlite3ExprDup(db, sqlite_expr, 0);
+                pNew = sqlite3ExprDup(db, sqlite_expr, 0);
             } else {
                 // Fallback: create column expr without binding (may fail)
-                pNew = lyrore_sqlite3Expr(db, TK_COLUMN, column_name.c_str());
+                pNew = sqlite3Expr(db, TK_COLUMN, column_name.c_str());
                 if (pNew) {
                     pNew->iColumn = column_index;
                     pNew->iTable = table_cursor;
@@ -137,37 +136,37 @@ Expr* LyExpr::to_sqlite_new(Parse* pParse) const {
         case TK_INTEGER:
             if (std::holds_alternative<int64_t>(value)) {
                 int64_t v = std::get<int64_t>(value);
-                pNew = lyrore_sqlite3Expr(db, TK_INTEGER, nullptr);
+                pNew = sqlite3Expr(db, TK_INTEGER, nullptr);
                 if (pNew) {
                     pNew->flags |= EP_IntValue;
                     pNew->u.iValue = static_cast<int>(v);
                 }
             } else {
-                pNew = lyrore_sqlite3Expr(db, TK_INTEGER, token.c_str());
+                pNew = sqlite3Expr(db, TK_INTEGER, token.c_str());
             }
             break;
             
         case TK_FLOAT:
-            pNew = lyrore_sqlite3Expr(db, TK_FLOAT, token.c_str());
+            pNew = sqlite3Expr(db, TK_FLOAT, token.c_str());
             break;
             
         case TK_STRING:
             if (std::holds_alternative<std::string>(value)) {
-                pNew = lyrore_sqlite3Expr(db, TK_STRING, std::get<std::string>(value).c_str());
+                pNew = sqlite3Expr(db, TK_STRING, std::get<std::string>(value).c_str());
             } else {
-                pNew = lyrore_sqlite3Expr(db, TK_STRING, token.c_str());
+                pNew = sqlite3Expr(db, TK_STRING, token.c_str());
             }
             break;
             
         case TK_NULL:
-            pNew = lyrore_sqlite3Expr(db, TK_NULL, nullptr);
+            pNew = sqlite3Expr(db, TK_NULL, nullptr);
             break;
             
         case TK_FUNCTION:
         case TK_AGG_FUNCTION:
             {
                 // Create function expression
-                pNew = lyrore_sqlite3Expr(db, tk_op, token.c_str());
+                pNew = sqlite3Expr(db, tk_op, token.c_str());
                 if (!pNew) break;
                 
                 // Create argument list
@@ -175,7 +174,7 @@ Expr* LyExpr::to_sqlite_new(Parse* pParse) const {
                     ExprList* pList = nullptr;
                     for (const auto& arg : args) {
                         Expr* pArgExpr = arg->to_sqlite_new(pParse);
-                        pList = lyrore_sqlite3ExprListAppend(pParse, pList, pArgExpr);
+                        pList = sqlite3ExprListAppend(pParse, pList, pArgExpr);
                     }
                     pNew->x.pList = pList;
                 }
@@ -184,7 +183,7 @@ Expr* LyExpr::to_sqlite_new(Parse* pParse) const {
             
         default:
             // Binary or unary operators
-            pNew = lyrore_sqlite3Expr(db, tk_op, nullptr);
+            pNew = sqlite3Expr(db, tk_op, nullptr);
             break;
     }
     
@@ -216,10 +215,10 @@ void LyExpr::to_sqlite(Parse* pParse, Expr* pTarget) const {
     if (!pNew) return;
     
     // Free OLD children of target
-    lyrore_sqlite3ExprDelete(db, pTarget->pLeft);
-    lyrore_sqlite3ExprDelete(db, pTarget->pRight);
+    sqlite3ExprDelete(db, pTarget->pLeft);
+    sqlite3ExprDelete(db, pTarget->pRight);
     if (ExprUseXList(pTarget) && pTarget->x.pList) {
-        lyrore_sqlite3ExprListDelete(db, pTarget->x.pList);
+        sqlite3ExprListDelete(db, pTarget->x.pList);
     }
     
     // Copy new structure into target, preserving target's address
@@ -245,7 +244,7 @@ void LyExpr::to_sqlite(Parse* pParse, Expr* pTarget) const {
     pNew->y.pWin = nullptr;
     
     // Free only the pNew wrapper (children now owned by pTarget)
-    lyrore_sqlite3DbFree(db, pNew);
+    sqlite3DbFree(db, pNew);
 }
 
 

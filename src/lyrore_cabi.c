@@ -1,8 +1,8 @@
 /*
 ** Lyrore C ABI Implementation
 ** 
-** Provides SQL function for plugin registration and hook wrappers.
-** The C++ SDK functions are linked directly into the sqlite3 binary.
+** Provides SQL function for plugin registration, hook wrappers,
+** and internal SQLite function wrappers for C++ SDK access.
 */
 
 #ifdef SQLITE_ENABLE_LYRORE
@@ -12,7 +12,7 @@
 #include <dlfcn.h>
 
 /* 
-** C++ SDK functions are now linked directly into the binary.
+** C++ SDK functions are linked directly into the binary.
 ** These are declared in lyrore_cabi.h and implemented in cpp_context.cpp.
 */
 
@@ -106,37 +106,103 @@ void lyroreInvokePostQueryHooks(sqlite3 *db, void *pVdbe){
   lyrore_cpp_invoke_postquery(ctx, pVdbe);
 }
 
+
+/* ============================================================
+** Lyrore Lifecycle Functions
+** Called from main.c and pragma.c
+** ============================================================ */
+
 /*
 ** Initialize Lyrore for a database connection.
+** Called from sqlite3_open* after basic setup.
 */
 int lyroreInit(sqlite3 *db){
-  /* Register SQL functions */
+  /* Register lyrore_register() SQL function */
   lyrore_register_functions(db);
+
+  /* Context is created lazily when first plugin is loaded */
   return SQLITE_OK;
 }
 
 /*
 ** Shutdown Lyrore for a database connection.
+** Called from sqlite3_close* before cleanup.
 */
 void lyroreShutdown(sqlite3 *db){
   if( db->pLyrore ){
     lyrore_cpp_destroy(db->pLyrore);
-    db->pLyrore = NULL;
+    db->pLyrore = 0;
   }
 }
 
 /*
-** Persist state (stub - plugins manage their own state)
+** Persist Lyrore state (placeholder for future use).
+** Called by PRAGMA lyrore_persist.
 */
 void lyrorePersistNow(sqlite3 *db){
+  /* Currently a no-op - state persistence not yet implemented */
   (void)db;
 }
 
 /*
-** Reset state (stub - plugins manage their own state)  
+** Reset Lyrore state.
+** Called by PRAGMA lyrore_reset.
 */
 void lyroreReset(sqlite3 *db){
-  (void)db;
+  if( db->pLyrore ){
+    /* Destroy and recreate context to reset state */
+    lyrore_cpp_destroy(db->pLyrore);
+    db->pLyrore = 0;
+  }
+}
+
+/* ============================================================
+** Internal SQLite Function Wrappers for C++ SDK
+** These wrap SQLITE_PRIVATE functions for external linkage
+** ============================================================ */
+
+Expr* lyrore_sqlite3Expr(sqlite3* db, int op, const char* zToken){
+  return sqlite3Expr(db, op, zToken);
+}
+
+Expr* lyrore_sqlite3ExprDup(sqlite3* db, Expr* pExpr, int dupFlags){
+  return sqlite3ExprDup(db, pExpr, dupFlags);
+}
+
+void lyrore_sqlite3ExprDelete(sqlite3* db, Expr* pExpr){
+  sqlite3ExprDelete(db, pExpr);
+}
+
+ExprList* lyrore_sqlite3ExprListAppend(Parse* pParse, ExprList* pList, Expr* pExpr){
+  return sqlite3ExprListAppend(pParse, pList, pExpr);
+}
+
+void lyrore_sqlite3ExprListDelete(sqlite3* db, ExprList* pList){
+  sqlite3ExprListDelete(db, pList);
+}
+
+Select* lyrore_sqlite3SelectDup(sqlite3* db, Select* pSelect, int flags){
+  return sqlite3SelectDup(db, pSelect, flags);
+}
+
+void lyrore_sqlite3SelectDelete(sqlite3* db, Select* pSelect){
+  sqlite3SelectDelete(db, pSelect);
+}
+
+void lyrore_sqlite3DbFree(sqlite3* db, void* p){
+  sqlite3DbFree(db, p);
+}
+
+int lyrore_sqlite3StrICmp(const char* zLeft, const char* zRight){
+  return sqlite3StrICmp(zLeft, zRight);
+}
+
+LogEst_wrapper lyrore_sqlite3LogEst(u64_wrapper x){
+  return (LogEst_wrapper)sqlite3LogEst((u64)x);
+}
+
+u64_wrapper lyrore_sqlite3LogEstToInt(LogEst_wrapper x){
+  return (u64_wrapper)sqlite3LogEstToInt((LogEst)x);
 }
 
 #endif /* SQLITE_ENABLE_LYRORE */

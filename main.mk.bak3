@@ -1442,13 +1442,13 @@ lyrore_cabi.o:	$(TOP)/src/lyrore_cabi.c $(DEPS_OBJ_COMMON)
 
 # C++ Lyrore SDK objects - compiled into SQLite for access to internal APIs
 ly_expr.o:	$(TOP)/ext/lyrore_sdk/src/ly_expr.cpp $(DEPS_OBJ_COMMON)
-	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/ly_expr.cpp
+	$(CXX) $(CFLAGS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/ly_expr.cpp
 
 cpp_context.o:	$(TOP)/ext/lyrore_sdk/src/cpp_context.cpp $(DEPS_OBJ_COMMON)
-	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/cpp_context.cpp
+	$(CXX) $(CFLAGS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/cpp_context.cpp
 
 pattern.o:	$(TOP)/ext/lyrore_sdk/src/pattern.cpp $(DEPS_OBJ_COMMON)
-	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/pattern.cpp
+	$(CXX) $(CFLAGS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/pattern.cpp
 
 
 tclsqlite.o:	$(T.tcl.env.sh) $(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
@@ -2199,13 +2199,16 @@ sqlite3-shell-static.flags.0 =
 # runtime performance hit, which is fine for use in the shell but is
 # not appropriate for the canonical library build.
 #
-# Note: Links against libsqlite3.so for Lyrore C++ SDK support
-sqlite3$(T.exe):	shell.c libsqlite3.so
-	$(CC) $(CFLAGS) -c -o shell.o shell.c $(SHELL_OPT) $(CFLAGS.icu)
-	$(CXX) $(CFLAGS) -o $@ shell.o -L. -lsqlite3 \
+# Note: Uses CXX and C++ SDK objects for Lyrore support
+sqlite3$(T.exe):	shell.c sqlite3.c ly_expr.o cpp_context.o pattern.o
+	$(CXX) $(CFLAGS) -o $@ \
+		shell.c sqlite3.c ly_expr.o cpp_context.o pattern.o \
 		$(sqlite3-shell-static.flags.$(STATIC_CLI_SHELL)) \
-		$(CFLAGS.readline) $(CFLAGS.icu) \
-		$(LDFLAGS.readline) -Wl,-rpath,$(shell pwd)
+		$(CFLAGS.readline) $(SHELL_OPT) $(CFLAGS.icu) \
+		$(LDFLAGS.libsqlite3) $(LDFLAGS.readline) -lstdc++
+#
+# Build sqlite3$(T.exe) by default except in wasi-sdk builds.  Yes, the
+# semantics of 0 and 1 are confusingly swapped here.
 #
 sqlite3$(T.exe)-1:
 sqlite3$(T.exe)-0: sqlite3$(T.exe)

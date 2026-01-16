@@ -6,6 +6,10 @@
 **
 ** This eliminates function call overhead and enables native arithmetic.
 ** Expected: 30x+ speedup (171ms -> <6ms on 10k rows)
+**
+** Note: The pattern API is best suited for query matching (identifying templates)
+** rather than expression transformation. For transformation, direct AST manipulation
+** is more efficient since we need access to the actual column expressions.
 */
 
 #include "lyrore_plugin.hpp"

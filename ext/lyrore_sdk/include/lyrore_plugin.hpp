@@ -14,16 +14,25 @@
 #include <optional>
 #include <cstdint>
 #include <functional>
+#include <map>
+#include <unordered_map>
 
 // Include SQLite internals with C linkage
 extern "C" {
 #include "sqliteInt.h"
 }
 
+// Forward declaration at global scope for C ABI compatibility
+struct LyroreCppContext;
+
 namespace lyrore {
 
 // Forward declarations
 class LyExpr;
+
+namespace pattern {
+    class MatchResult;
+}
 using LyExprPtr = std::shared_ptr<LyExpr>;
 
 /*
@@ -244,6 +253,7 @@ public:
     }
     
     Expr* where_raw() { return select_ ? select_->pWhere : nullptr; }
+    Select* select_raw() { return select_; }  // Direct access to Select*
     Parse* parse() { return parse_; }
     sqlite3* db() { return db_; }
     
@@ -291,6 +301,9 @@ public:
     // Raw access (advanced use) - returns void* since types not available
     void* loop_raw() { return loop_; }
     void* builder_raw() { return builder_; }
+
+    // Select* access for cross-hook state (implemented in cpp_context.cpp)
+    Select* select_raw();
     
     // WHERE clause access for predicate pattern matching
     // Get number of WHERE clause terms
@@ -418,6 +431,32 @@ public:
     virtual void onEstimate(EstimateContext& ctx) { (void)ctx; }
     virtual void onPostQuery(PostQueryContext& ctx) { (void)ctx; }
     virtual void onAnalyze(AnalyzeContext& ctx) { (void)ctx; }
+    
+    // Cross-hook template state methods
+    // These allow storing match results in one hook and retrieving in another
+    // The state is keyed by Select* pointer which is stable across hooks
+    
+    // Store match result for retrieval in later hooks
+    void set_template_match(Select* sel, int template_id, 
+                           const std::map<std::string, LyValue>& params,
+                           const std::map<std::string, LyExprPtr>& expr_params = {});
+    
+    // Retrieve template ID from earlier hook (nullopt if not found)
+    std::optional<int> get_template_id(Select* sel) const;
+    
+    // Retrieve parameters from earlier hook (nullptr if not found)
+    const std::map<std::string, LyValue>* get_template_params(Select* sel) const;
+    
+    // Retrieve expression parameters from earlier hook (nullptr if not found)
+    const std::map<std::string, LyExprPtr>* get_template_expr_params(Select* sel) const;
+    
+    // Clear match for a Select* (optional cleanup)
+    void clear_template_match(Select* sel);
+
+protected:
+    // Context pointer set by plugin manager
+    friend struct ::LyroreCppContext;
+    ::LyroreCppContext* context_ = nullptr;
 };
 
 
