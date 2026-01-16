@@ -16,7 +16,6 @@
 #include <unordered_map>
 
 // Include whereInt.h for WhereLoop/WhereLoopBuilder definitions
-// This is needed in the SDK implementation but not exposed to plugins
 extern "C" {
 #include "whereInt.h"
 
@@ -42,7 +41,6 @@ std::string EstimateContext::table_name() const {
 
 int64_t EstimateContext::cardinality() const {
     WhereLoop* loop = static_cast<WhereLoop*>(loop_);
-    // nOut is LogEst (log2(x) * 10)
     return lyrore_sqlite3LogEstToInt(loop->nOut);
 }
 
@@ -62,39 +60,34 @@ bool EstimateContext::is_index_scan() const {
     return (loop->wsFlags & WHERE_INDEXED) != 0;
 }
 
-
-// Get number of WHERE clause terms
 int EstimateContext::num_where_terms() const {
     WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
     if (!builder || !builder->pWC) return 0;
     return builder->pWC->nTerm;
 }
 
-// Get a specific WHERE term as LyExpr by index
-LyExprPtr EstimateContext::get_where_term(int index) const {
+// Get a specific WHERE term as raw Expr* by index
+Expr* EstimateContext::get_where_term(int index) const {
     WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
     if (!builder || !builder->pWC) return nullptr;
     if (index < 0 || index >= builder->pWC->nTerm) return nullptr;
-    Expr* pExpr = builder->pWC->a[index].pExpr;
-    if (!pExpr) return nullptr;
-    return LyExpr::from_sqlite(pExpr);
+    return builder->pWC->a[index].pExpr;
 }
 
-// Get all WHERE terms as LyExpr vector  
-std::vector<LyExprPtr> EstimateContext::get_where_terms() const {
-    std::vector<LyExprPtr> terms;
+// Get all WHERE terms as raw Expr* vector
+std::vector<Expr*> EstimateContext::get_where_terms() const {
+    std::vector<Expr*> terms;
     WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
     if (!builder || !builder->pWC) return terms;
     for (int i = 0; i < builder->pWC->nTerm; i++) {
         Expr* pExpr = builder->pWC->a[i].pExpr;
         if (pExpr) {
-            terms.push_back(LyExpr::from_sqlite(pExpr));
+            terms.push_back(pExpr);
         }
     }
     return terms;
 }
 
-// Get Select* via pBuilder->pWInfo->pSelect
 Select* EstimateContext::select_raw() {
     WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
     if (!builder || !builder->pWInfo) return nullptr;
@@ -102,12 +95,10 @@ Select* EstimateContext::select_raw() {
 }
 
 int64_t PostQueryContext::exec_time_us() const {
-    // Would need internal tracking - return 0 for now
     return 0;
 }
 
 int64_t PostQueryContext::vm_steps() const {
-    // Would need internal tracking - return 0 for now
     return 0;
 }
 
@@ -115,7 +106,6 @@ int64_t PostQueryContext::vm_steps() const {
 
 
 // ===== Plugin Entry Management =====
-// Note: These are at global scope to match C ABI declarations
 
 struct PluginEntry {
     void* handle;
@@ -126,7 +116,6 @@ struct PluginEntry {
     ~PluginEntry() {
         if (plugin) {
             plugin->onShutdown();
-            // Find destroy function
             void (*destroy)(lyrore::Plugin*) = (void(*)(lyrore::Plugin*))dlsym(handle, "lyrore_destroy_plugin");
             if (destroy) {
                 destroy(plugin);
@@ -141,51 +130,42 @@ struct PluginEntry {
 };
 
 
-// ===== C++ Context - at global scope for C ABI compatibility =====
+// ===== C++ Context =====
 
 struct LyroreCppContext {
     sqlite3* db;
     std::vector<std::unique_ptr<PluginEntry>> plugins;
 
-    // Per-query cross-hook state
-    // Keyed by Select* pointer which is stable across hooks for same query
+    // Per-query cross-hook state (simplified - no LyExprPtr)
     struct QueryState {
         int template_id = -1;
         std::map<std::string, lyrore::LyValue> params;
-        std::map<std::string, lyrore::LyExprPtr> expr_params;
     };
     std::unordered_map<Select*, QueryState> query_states_;
 
     explicit LyroreCppContext(sqlite3* db_) : db(db_) {}
 
     int load_plugin(const char* path) {
-        // Open the shared library with RTLD_GLOBAL so plugin can call SQLite APIs
         void* handle = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
         if (!handle) {
             return SQLITE_ERROR;
         }
 
-        // Find the plugin factory function
         lyrore::Plugin* (*create)() = (lyrore::Plugin*(*)())dlsym(handle, "lyrore_create_plugin");
         if (!create) {
             dlclose(handle);
             return SQLITE_ERROR;
         }
 
-        // Create the plugin
         lyrore::Plugin* plugin = create();
         if (!plugin) {
             dlclose(handle);
             return SQLITE_ERROR;
         }
 
-        // Set the context pointer for cross-hook state access
         plugin->context_ = this;
-
-        // Initialize the plugin
         plugin->onInit(db);
 
-        // Store the plugin
         auto entry = std::make_unique<PluginEntry>();
         entry->handle = handle;
         entry->plugin = plugin;
@@ -198,7 +178,7 @@ struct LyroreCppContext {
     void invoke_preopt(Parse* pParse, Select* pSelect) {
         if (!pSelect) return;
 
-        // Check if pattern capture mode is active (for Pattern::from_query)
+        // Check if pattern capture mode is active
         lyrore_pattern_capture_preopt(pSelect);
 
         lyrore::PreOptContext ctx(db, pParse, pSelect);
@@ -215,7 +195,7 @@ struct LyroreCppContext {
     }
 
     void invoke_analyze(int iDb) {
-        (void)iDb;  // May use later for schema-specific hooks
+        (void)iDb;
         lyrore::AnalyzeContext ctx(db);
         for (auto& entry : plugins) {
             entry->plugin->onAnalyze(ctx);
@@ -229,14 +209,12 @@ struct LyroreCppContext {
         }
     }
 
-    // Cross-hook state methods
+    // Cross-hook state methods (simplified)
     void set_query_state(Select* sel, int template_id, 
-                        const std::map<std::string, lyrore::LyValue>& params,
-                        const std::map<std::string, lyrore::LyExprPtr>& expr_params) {
+                        const std::map<std::string, lyrore::LyValue>& params) {
         auto& state = query_states_[sel];
         state.template_id = template_id;
         state.params = params;
-        state.expr_params = expr_params;
     }
 
     std::optional<int> get_query_template_id(Select* sel) const {
@@ -251,12 +229,6 @@ struct LyroreCppContext {
         return &it->second.params;
     }
 
-    const std::map<std::string, lyrore::LyExprPtr>* get_query_expr_params(Select* sel) const {
-        auto it = query_states_.find(sel);
-        if (it == query_states_.end()) return nullptr;
-        return &it->second.expr_params;
-    }
-
     void clear_query_state(Select* sel) {
         query_states_.erase(sel);
     }
@@ -268,10 +240,9 @@ struct LyroreCppContext {
 namespace lyrore {
 
 void Plugin::set_template_match(Select* sel, int template_id, 
-                               const std::map<std::string, LyValue>& params,
-                               const std::map<std::string, LyExprPtr>& expr_params) {
+                               const std::map<std::string, LyValue>& params) {
     if (!context_) return;
-    context_->set_query_state(sel, template_id, params, expr_params);
+    context_->set_query_state(sel, template_id, params);
 }
 
 std::optional<int> Plugin::get_template_id(Select* sel) const {
@@ -282,11 +253,6 @@ std::optional<int> Plugin::get_template_id(Select* sel) const {
 const std::map<std::string, LyValue>* Plugin::get_template_params(Select* sel) const {
     if (!context_) return nullptr;
     return context_->get_query_params(sel);
-}
-
-const std::map<std::string, LyExprPtr>* Plugin::get_template_expr_params(Select* sel) const {
-    if (!context_) return nullptr;
-    return context_->get_query_expr_params(sel);
 }
 
 void Plugin::clear_template_match(Select* sel) {

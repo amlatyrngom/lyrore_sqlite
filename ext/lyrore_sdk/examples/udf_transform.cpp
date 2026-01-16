@@ -4,50 +4,107 @@
 ** Transforms: product_filter(price, qty, threshold) = 1
 ** Into:       (price * qty) < threshold
 **
-** This eliminates function call overhead and enables native arithmetic.
+** Uses raw SQLite C API for AST manipulation (no LyExpr).
 ** Expected: 30x+ speedup (171ms -> <6ms on 10k rows)
-**
-** Note: The pattern API is best suited for query matching (identifying templates)
-** rather than expression transformation. For transformation, direct AST manipulation
-** is more efficient since we need access to the actual column expressions.
 */
 
 #include "lyrore_plugin.hpp"
+#include "lyrore_cabi.h"
+#include <cstring>
 
 class UdfTransformPlugin : public lyrore::Plugin {
 public:
     std::string name() const override { return "udf_transform"; }
 
     void onPreOpt(lyrore::PreOptContext& ctx) override {
-        auto where = ctx.where();
-        if (!where) return;
+        Expr* pWhere = ctx.where_raw();
+        if (!pWhere) return;
 
-        // Match pattern: product_filter(a, b, c) = 1
-        if (where->op != lyrore::LyOp::EQ) return;
+        // Match pattern: product_filter(a, b, c) = 1  (or 1 = product_filter(...))
+        if (pWhere->op != TK_EQ) return;
 
-        lyrore::LyExpr* func = where->left.get();
-        lyrore::LyExpr* val = where->right.get();
+        Expr* pFunc = pWhere->pLeft;
+        Expr* pVal = pWhere->pRight;
 
         // Handle reversed order: 1 = product_filter(...)
-        if (val && val->is_function()) {
-            std::swap(func, val);
+        if (pVal && pVal->op == TK_FUNCTION) {
+            Expr* tmp = pFunc;
+            pFunc = pVal;
+            pVal = tmp;
         }
 
-        // Check: function is product_filter with 3 args
-        if (!func || !func->is_function("product_filter")) return;
-        if (func->nargs() != 3) return;
+        // Check: left side is function named "product_filter"
+        if (!pFunc || pFunc->op != TK_FUNCTION) return;
+        if (!pFunc->u.zToken || lyrore_sqlite3StrICmp(pFunc->u.zToken, "product_filter") != 0) return;
+
+        // Check: function has 3 arguments
+        ExprList* pArgs = pFunc->x.pList;
+        if (!pArgs || pArgs->nExpr != 3) return;
 
         // Check: compared to integer 1
-        if (!val || !val->is_integer()) return;
-        auto int_val = val->as_int();
-        if (!int_val || *int_val != 1) return;
+        if (!pVal || pVal->op != TK_INTEGER) return;
+        if (pVal->u.iValue != 1) return;
 
-        // Build: (arg0 * arg1) < arg2
-        auto mul = lyrore::LyExpr::multiply(func->arg(0), func->arg(1));
-        auto cmp = lyrore::LyExpr::less_than(std::move(mul), func->arg(2));
+        // Get the arguments
+        Expr* pPrice = pArgs->a[0].pExpr;
+        Expr* pQty = pArgs->a[1].pExpr;
+        Expr* pThreshold = pArgs->a[2].pExpr;
 
-        // Substitute back
-        cmp->to_sqlite(ctx.parse(), ctx.where_raw());
+        if (!pPrice || !pQty || !pThreshold) return;
+
+        // Build: (price * qty) < threshold
+        // Using raw SQLite C API via lyrore_cabi wrappers
+        sqlite3* db = ctx.db();
+
+        // Duplicate the column expressions to preserve Table* bindings
+        Expr* pPriceDup = lyrore_sqlite3ExprDup(db, pPrice, 0);
+        Expr* pQtyDup = lyrore_sqlite3ExprDup(db, pQty, 0);
+        Expr* pThreshDup = lyrore_sqlite3ExprDup(db, pThreshold, 0);
+
+        if (!pPriceDup || !pQtyDup || !pThreshDup) {
+            // Cleanup on failure
+            if (pPriceDup) lyrore_sqlite3ExprDelete(db, pPriceDup);
+            if (pQtyDup) lyrore_sqlite3ExprDelete(db, pQtyDup);
+            if (pThreshDup) lyrore_sqlite3ExprDelete(db, pThreshDup);
+            return;
+        }
+
+        // Create: price * qty
+        Expr* pMul = lyrore_sqlite3Expr(db, TK_STAR, nullptr);
+        if (!pMul) {
+            lyrore_sqlite3ExprDelete(db, pPriceDup);
+            lyrore_sqlite3ExprDelete(db, pQtyDup);
+            lyrore_sqlite3ExprDelete(db, pThreshDup);
+            return;
+        }
+        pMul->pLeft = pPriceDup;
+        pMul->pRight = pQtyDup;
+
+        // Create: (price * qty) < threshold
+        Expr* pLt = lyrore_sqlite3Expr(db, TK_LT, nullptr);
+        if (!pLt) {
+            lyrore_sqlite3ExprDelete(db, pMul);
+            lyrore_sqlite3ExprDelete(db, pThreshDup);
+            return;
+        }
+        pLt->pLeft = pMul;
+        pLt->pRight = pThreshDup;
+
+        // In-place substitution into pWhere
+        // Free old children of pWhere
+        lyrore_sqlite3ExprDelete(db, pWhere->pLeft);
+        lyrore_sqlite3ExprDelete(db, pWhere->pRight);
+
+        // Copy new expression into pWhere
+        pWhere->op = pLt->op;
+        pWhere->pLeft = pLt->pLeft;
+        pWhere->pRight = pLt->pRight;
+
+        // Detach children from pLt before freeing wrapper
+        pLt->pLeft = nullptr;
+        pLt->pRight = nullptr;
+        lyrore_sqlite3DbFree(db, pLt);
+
         ctx.set_modified();
     }
 };

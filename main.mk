@@ -564,13 +564,13 @@ LIBOBJS0 = alter.o analyze.o attach.o auth.o \
          vdbetrace.o vdbevtab.o vtab.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
          window.o \
-         ly_expr.o cpp_context.o pattern.o lyrore_cabi.o
+         cpp_context.o pattern.o lyrore_cabi.o
 LIBOBJS = $(LIBOBJS0)
 
 #
 # Object files for the amalgamation.
 #
-LIBOBJS1 = sqlite3.o ly_expr.o cpp_context.o pattern.o
+LIBOBJS1 = sqlite3.o cpp_context.o pattern.o
 
 #
 # Determine the real value of LIBOBJ based on whether the amalgamation
@@ -1441,8 +1441,6 @@ lyrore_cabi.o:	$(TOP)/src/lyrore_cabi.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) -c $(TOP)/src/lyrore_cabi.c
 
 # C++ Lyrore SDK objects - compiled into SQLite for access to internal APIs
-ly_expr.o:	$(TOP)/ext/lyrore_sdk/src/ly_expr.cpp $(DEPS_OBJ_COMMON)
-	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/ly_expr.cpp
 
 cpp_context.o:	$(TOP)/ext/lyrore_sdk/src/cpp_context.cpp $(DEPS_OBJ_COMMON)
 	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/cpp_context.cpp

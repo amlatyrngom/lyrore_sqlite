@@ -3,8 +3,6 @@
 **
 ** Builds a histogram during ANALYZE for better cardinality estimation.
 ** Uses the Pattern API for WHERE clause matching.
-**
-** LOC Reduction: ~80 LOC manual matching -> ~10 LOC pattern API
 */
 
 #include "lyrore_plugin.hpp"
@@ -59,9 +57,9 @@ public:
         // Only apply to products table
         if (ctx.table_name() != "products") return;
 
-        // Get WHERE clause terms and match against pattern
+        // Get WHERE clause terms (raw Expr*) and match against pattern
         auto terms = ctx.get_where_terms();
-        for (const auto& term : terms) {
+        for (Expr* term : terms) {
             if (auto m = pattern_->match_expr(term)) {
                 // Pattern matched! Extract threshold from $1
                 double threshold = m.get<double>("$1");
@@ -75,7 +73,6 @@ public:
     }
 
 private:
-    // Count rows below threshold using histogram
     int64_t countBelowThreshold(double threshold) const {
         int64_t count = 0;
         int maxBucket = std::min((int)(threshold / BUCKET_SIZE), NUM_BUCKETS - 1);

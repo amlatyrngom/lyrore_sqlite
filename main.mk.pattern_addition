@@ -1,3 +1,0 @@
-
-pattern.o:	$(TOP)/ext/lyrore_sdk/src/pattern.cpp $(DEPS_OBJ_COMMON)
-	$(CXX) $(CFLAGS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/pattern.cpp

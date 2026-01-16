@@ -1,2 +1,0 @@
-Threshold | Actual | Default Est | Oracle Est | Q-error Before | Q-error After | Improvement
-----------|--------|-------------|------------|----------------|---------------|------------

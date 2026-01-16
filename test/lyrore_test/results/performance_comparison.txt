@@ -1,5 +1,0 @@
-Expression Type | Average Time (us) | Speedup
-----------------|-------------------|--------
-Native          | 8163              | baseline
-UDF             | 24090             | -
-Speedup         | -                 | 2.95x

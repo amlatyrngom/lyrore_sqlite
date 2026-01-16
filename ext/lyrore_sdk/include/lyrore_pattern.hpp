@@ -28,12 +28,13 @@ using PatternPtr = std::shared_ptr<Pattern>;
  */
 struct PatternCaptureState {
     static thread_local bool capture_mode;
-    static thread_local Select* captured_select_dup;  // OWNED dupped copy, valid after hook
+    static thread_local Select* captured_select_dup;
     static thread_local sqlite3* capture_db;
 };
 
 /**
  * Result of a pattern match operation.
+ * Stores extracted parameter values from the matched query.
  */
 class MatchResult {
 public:
@@ -42,28 +43,29 @@ public:
     operator bool() const { return matched_; }
     bool matched() const { return matched_; }
 
+    /**
+     * Get parameter value by name ($1, $2, :name, etc.)
+     */
     template<typename T>
     T get(const char* param) const;
 
-    LyExprPtr get_expr(const char* param) const;
-
+    /**
+     * Get all captured literal parameters
+     */
     const std::map<std::string, LyValue>& params() const { return params_; }
-    const std::map<std::string, LyExprPtr>& expr_params() const { return expr_params_; }
 
     void set_matched(bool m) { matched_ = m; }
     void set_param(const std::string& name, const LyValue& val) { params_[name] = val; }
-    void set_expr_param(const std::string& name, const LyExprPtr& expr) { expr_params_[name] = expr; }
 
     int& auto_param_index() { return auto_param_index_; }
 
 private:
     bool matched_ = false;
     std::map<std::string, LyValue> params_;
-    std::map<std::string, LyExprPtr> expr_params_;
     int auto_param_index_ = 0;
 };
 
-// Template specializations declared
+// Template specializations for common types
 template<> int64_t MatchResult::get<int64_t>(const char* param) const;
 template<> double MatchResult::get<double>(const char* param) const;
 template<> std::string MatchResult::get<std::string>(const char* param) const;
@@ -81,6 +83,13 @@ enum class InitState : int {
 /**
  * SQL-based pattern for matching query structures.
  * Uses SQLite's own parser for pattern specification.
+ * 
+ * Example usage:
+ *   auto pattern = Pattern::from_where_expr(db, 
+ *       "SELECT 1 FROM products WHERE (price * qty) < ?");
+ *   if (auto m = pattern->match_expr(whereExpr)) {
+ *       double threshold = m.get<double>("$1");
+ *   }
  */
 class Pattern {
 public:
@@ -101,7 +110,7 @@ public:
 
     /**
      * Create pattern from WHERE expression via wrapper query.
-     * Uses LAZY initialization - actual parsing deferred to first match().
+     * Example: "SELECT 1 FROM products WHERE price * qty < ?"
      */
     static PatternPtr from_where_expr(sqlite3* db, const char* sql);
 
@@ -111,10 +120,9 @@ public:
     MatchResult match(const Select* pSelect) const;
 
     /**
-     * Match against an expression (WHERE clause match).
+     * Match against a raw expression (WHERE clause match).
      */
     MatchResult match_expr(const Expr* pExpr) const;
-    MatchResult match_expr(const LyExprPtr& expr) const;
 
     /**
      * Get number of parameters in pattern.
@@ -123,7 +131,6 @@ public:
 
     /**
      * Check if pattern is valid (initialized successfully).
-     * Safe to call during recursive pattern init - returns false if init in progress.
      */
     bool is_valid() const;
 
@@ -145,7 +152,7 @@ private:
     mutable std::vector<Expr*> param_positions_;
     bool is_where_only_ = false;
 
-    // Lazy initialization - returns true if init was performed (or already done)
+    // Lazy initialization
     bool try_initialize() const;
     void do_initialize() const;
 
@@ -164,7 +171,6 @@ private:
 
 /**
  * Check if we're currently inside pattern initialization.
- * Used to prevent recursive pattern matching during init.
  */
 bool in_pattern_init();
 
