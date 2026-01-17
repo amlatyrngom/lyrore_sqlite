@@ -1,59 +1,56 @@
 /*
-** Lyrore C++ Plugin SDK - Plugin Manager Implementation
+** Lyrore C++ Context Implementation
 ** 
-** This file implements the C++ plugin manager that handles plugin loading
-** and hook invocation. It provides the C ABI interface for SQLite integration.
+** Implements context classes and C ABI entry points.
 */
-
 #include "lyrore_plugin.hpp"
-#include "lyrore_cabi.h"
-#include "lyrore_pattern.hpp"
 #include "lyrore_custom_op.hpp"
+
 #include <dlfcn.h>
-#include <vector>
-#include <string>
+#include <iostream>
 #include <cstring>
-#include <memory>
-#include <unordered_map>
 
-// Include whereInt.h for WhereLoop/WhereLoopBuilder definitions
 extern "C" {
+#include "sqliteInt.h"
 #include "whereInt.h"
-
-// Forward declaration for pattern capture hook
-void lyrore_pattern_capture_preopt(void* pSelect);
+#include "lyrore_cabi.h"
 }
 
 namespace lyrore {
 
-// ===== Context Methods Implementation =====
+// ===== EstimateContext Implementation =====
 
 std::string EstimateContext::table_name() const {
-    WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
     WhereLoop* loop = static_cast<WhereLoop*>(loop_);
-    if (!builder || !builder->pWInfo) return "";
-    WhereInfo* wi = builder->pWInfo;
+    WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
+    if (!loop || !builder || !builder->pWInfo || !builder->pWInfo->pTabList) return "";
+
+    // WhereLoop::iTab is the index into pWInfo->pTabList->a[]
     int iTab = loop->iTab;
-    if (iTab < 0 || !wi->pTabList) return "";
-    if (iTab >= wi->pTabList->nSrc) return "";
-    const char* name = wi->pTabList->a[iTab].zName;
-    return name ? name : "";
+    SrcList* pTabList = builder->pWInfo->pTabList;
+    if (iTab < 0 || iTab >= pTabList->nSrc) return "";
+
+    SrcItem* pItem = &pTabList->a[iTab];
+    if (!pItem || !pItem->pSTab) return "";
+
+    return pItem->pSTab->zName ? pItem->pSTab->zName : "";
 }
 
 int64_t EstimateContext::cardinality() const {
     WhereLoop* loop = static_cast<WhereLoop*>(loop_);
-    return lyrore_sqlite3LogEstToInt(loop->nOut);
+    if (!loop) return 0;
+    return (int64_t)lyrore_sqlite3LogEstToInt((LogEst_wrapper)loop->nOut);
 }
 
 void EstimateContext::set_cardinality(int64_t rows) {
     WhereLoop* loop = static_cast<WhereLoop*>(loop_);
-    if (rows < 1) rows = 1;
-    loop->nOut = lyrore_sqlite3LogEst(static_cast<u64>(rows));
+    if (!loop) return;
+    loop->nOut = (LogEst)lyrore_sqlite3LogEst((u64_wrapper)rows);
 }
 
 bool EstimateContext::is_full_scan() const {
     WhereLoop* loop = static_cast<WhereLoop*>(loop_);
-    return !(loop->wsFlags & WHERE_INDEXED);
+    return loop && (loop->wsFlags & WHERE_IPK) != 0 && loop->nLTerm == 0;
 }
 
 bool EstimateContext::is_index_scan() const {
@@ -67,7 +64,6 @@ int EstimateContext::num_where_terms() const {
     return builder->pWC->nTerm;
 }
 
-// Get a specific WHERE term as raw Expr* by index
 LyExprPtr EstimateContext::get_where_term(int index) const {
     WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
     if (!builder || !builder->pWC) return nullptr;
@@ -75,7 +71,6 @@ LyExprPtr EstimateContext::get_where_term(int index) const {
     return LyExpr::from_sqlite(builder->pWC->a[index].pExpr);
 }
 
-// Get all WHERE terms as LyExpr vector
 std::vector<LyExprPtr> EstimateContext::get_where_terms() const {
     std::vector<LyExprPtr> terms;
     WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
@@ -89,7 +84,6 @@ std::vector<LyExprPtr> EstimateContext::get_where_terms() const {
     return terms;
 }
 
-// Raw Expr* access for Pattern API
 Expr* EstimateContext::get_where_term_raw(int index) const {
     WhereLoopBuilder* builder = static_cast<WhereLoopBuilder*>(builder_);
     if (!builder || !builder->pWC) return nullptr;
@@ -116,13 +110,147 @@ Select* EstimateContext::select_raw() {
     return builder->pWInfo->pSelect;
 }
 
-int64_t PostQueryContext::exec_time_us() const {
+
+
+// ===== PostQueryContext Implementation (Enhanced) =====
+
+StmtStats PostQueryContext::stmt_stats() const {
+    StmtStats stats;
+
+    // Get the statement from Vdbe
+    Vdbe* v = static_cast<Vdbe*>(pVdbe_);
+    if (!v) return stats;
+
+    sqlite3_stmt* pStmt = reinterpret_cast<sqlite3_stmt*>(v);
+
+    // Collect all statement-level statistics
+    stats.fullscan_steps = sqlite3_stmt_status(pStmt, SQLITE_STMTSTATUS_FULLSCAN_STEP, 0);
+    stats.sorts = sqlite3_stmt_status(pStmt, SQLITE_STMTSTATUS_SORT, 0);
+    stats.autoindex_inserts = sqlite3_stmt_status(pStmt, SQLITE_STMTSTATUS_AUTOINDEX, 0);
+    stats.vm_steps = sqlite3_stmt_status(pStmt, SQLITE_STMTSTATUS_VM_STEP, 0);
+    stats.runs = sqlite3_stmt_status(pStmt, SQLITE_STMTSTATUS_RUN, 0);
+    stats.filter_hits = sqlite3_stmt_status(pStmt, SQLITE_STMTSTATUS_FILTER_HIT, 0);
+    stats.filter_misses = sqlite3_stmt_status(pStmt, SQLITE_STMTSTATUS_FILTER_MISS, 0);
+    stats.memory_used = sqlite3_stmt_status(pStmt, SQLITE_STMTSTATUS_MEMUSED, 0);
+    stats.reprepares = sqlite3_stmt_status(pStmt, SQLITE_STMTSTATUS_REPREPARE, 0);
+
+    return stats;
+}
+
+std::vector<ScanStats> PostQueryContext::scan_stats() const {
+    std::vector<ScanStats> result;
+
+#ifdef SQLITE_ENABLE_STMT_SCANSTATUS
+    Vdbe* v = static_cast<Vdbe*>(pVdbe_);
+    if (!v) return result;
+
+    sqlite3_stmt* pStmt = reinterpret_cast<sqlite3_stmt*>(v);
+
+    int idx = 0;
+    while (true) {
+        ScanStats s;
+        int rc;
+
+        // Get scan ID
+        rc = sqlite3_stmt_scanstatus_v2(pStmt, idx, SQLITE_SCANSTAT_SELECTID, 
+                                         SQLITE_SCANSTAT_COMPLEX, &s.scan_id);
+        if (rc != SQLITE_OK) break;  // No more scans
+
+        // Get parent ID
+        sqlite3_stmt_scanstatus_v2(pStmt, idx, SQLITE_SCANSTAT_PARENTID,
+                                    SQLITE_SCANSTAT_COMPLEX, &s.parent_id);
+
+        // Get table/index name
+        const char* zName = nullptr;
+        sqlite3_stmt_scanstatus_v2(pStmt, idx, SQLITE_SCANSTAT_NAME,
+                                    SQLITE_SCANSTAT_COMPLEX, &zName);
+        if (zName) s.name = zName;
+
+        // Get EXPLAIN text
+        const char* zExplain = nullptr;
+        sqlite3_stmt_scanstatus_v2(pStmt, idx, SQLITE_SCANSTAT_EXPLAIN,
+                                    SQLITE_SCANSTAT_COMPLEX, &zExplain);
+        if (zExplain) s.explain = zExplain;
+
+        // Get loop count
+        sqlite3_int64 nLoop = 0;
+        sqlite3_stmt_scanstatus_v2(pStmt, idx, SQLITE_SCANSTAT_NLOOP,
+                                    SQLITE_SCANSTAT_COMPLEX, &nLoop);
+        s.loops = nLoop;
+
+        // Get visit count
+        sqlite3_int64 nVisit = 0;
+        sqlite3_stmt_scanstatus_v2(pStmt, idx, SQLITE_SCANSTAT_NVISIT,
+                                    SQLITE_SCANSTAT_COMPLEX, &nVisit);
+        s.visits = nVisit;
+
+        // Get estimate
+        sqlite3_stmt_scanstatus_v2(pStmt, idx, SQLITE_SCANSTAT_EST,
+                                    SQLITE_SCANSTAT_COMPLEX, &s.estimate);
+
+        // Get cycles (may not be available)
+        sqlite3_int64 nCycle = -1;
+        rc = sqlite3_stmt_scanstatus_v2(pStmt, idx, SQLITE_SCANSTAT_NCYCLE,
+                                         SQLITE_SCANSTAT_COMPLEX, &nCycle);
+        s.cycles = (rc == SQLITE_OK) ? nCycle : -1;
+
+        result.push_back(s);
+        idx++;
+    }
+#endif
+
+    return result;
+}
+
+int PostQueryContext::scan_count() const {
+#ifdef SQLITE_ENABLE_STMT_SCANSTATUS
+    Vdbe* v = static_cast<Vdbe*>(pVdbe_);
+    if (!v) return 0;
+
+    sqlite3_stmt* pStmt = reinterpret_cast<sqlite3_stmt*>(v);
+
+    int count = 0;
+    int dummy;
+    while (sqlite3_stmt_scanstatus_v2(pStmt, count, SQLITE_SCANSTAT_SELECTID,
+                                       SQLITE_SCANSTAT_COMPLEX, &dummy) == SQLITE_OK) {
+        count++;
+    }
+    return count;
+#else
     return 0;
+#endif
+}
+
+int64_t PostQueryContext::total_cycles() const {
+#ifdef SQLITE_ENABLE_STMT_SCANSTATUS
+    auto scans = scan_stats();
+    int64_t total = 0;
+    for (const auto& s : scans) {
+        if (s.cycles >= 0) total += s.cycles;
+    }
+    return total > 0 ? total : -1;
+#else
+    return -1;
+#endif
+}
+
+bool PostQueryContext::scanstatus_enabled() const {
+#ifdef SQLITE_ENABLE_STMT_SCANSTATUS
+    return true;
+#else
+    return false;
+#endif
+}
+
+// Legacy methods
+int64_t PostQueryContext::exec_time_us() const {
+    return 0;  // Not available without profiling
 }
 
 int64_t PostQueryContext::vm_steps() const {
-    return 0;
+    return stmt_stats().vm_steps;
 }
+
 
 } // namespace lyrore
 
@@ -158,7 +286,7 @@ struct LyroreCppContext {
     sqlite3* db;
     std::vector<std::unique_ptr<PluginEntry>> plugins;
 
-    // Per-query cross-hook state (simplified - no LyExprPtr)
+    // Per-query cross-hook state
     struct QueryState {
         int template_id = -1;
         std::map<std::string, lyrore::LyValue> params;
@@ -204,13 +332,11 @@ struct LyroreCppContext {
         lyrore_pattern_capture_preopt(pSelect);
 
         lyrore::PreOptContext ctx(db, pParse, pSelect);
-        
-        // First, invoke plugin hooks
+
         for (auto& entry : plugins) {
             entry->plugin->onPreOpt(ctx);
         }
-        
-        // Then, perform custom operator AST rewrites
+
         lyrore::rewrite_custom_ops(ctx);
     }
 
@@ -236,7 +362,6 @@ struct LyroreCppContext {
         }
     }
 
-    // Cross-hook state methods (simplified)
     void set_query_state(Select* sel, int template_id, 
                         const std::map<std::string, lyrore::LyValue>& params) {
         auto& state = query_states_[sel];
@@ -269,7 +394,7 @@ namespace lyrore {
 void Plugin::set_template_match(Select* sel, int template_id, 
                                const std::map<std::string, LyValue>& params,
                                const std::map<std::string, LyExprPtr>& expr_params) {
-    (void)expr_params;  // TODO: Store expr_params if needed
+    (void)expr_params;
     if (!context_) return;
     context_->set_query_state(sel, template_id, params);
 }
@@ -282,6 +407,12 @@ std::optional<int> Plugin::get_template_id(Select* sel) const {
 const std::map<std::string, LyValue>* Plugin::get_template_params(Select* sel) const {
     if (!context_) return nullptr;
     return context_->get_query_params(sel);
+}
+
+const std::map<std::string, LyExprPtr>* Plugin::get_template_expr_params(Select* sel) const {
+    // Not implemented in current context storage
+    (void)sel;
+    return nullptr;
 }
 
 void Plugin::clear_template_match(Select* sel) {
@@ -302,9 +433,6 @@ LyroreCppContext* lyrore_cpp_create(sqlite3* db) {
 
 void lyrore_cpp_destroy(LyroreCppContext* ctx) {
     if (!ctx) return;
-    // Clean up CustomOpRegistry for this connection BEFORE deleting ctx
-    // This ensures the registry (with std::function stored in plugin) is cleaned 
-    // while the plugin is still loaded
     lyrore::CustomOpRegistry::cleanup(ctx->db);
     delete ctx;
 }

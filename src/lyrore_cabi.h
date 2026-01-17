@@ -27,6 +27,32 @@ typedef short LogEst_wrapper;
 /* Opaque pointer to C++ context */
 typedef struct LyroreCppContext LyroreCppContext;
 
+/* Forward declaration for LyroreMain */
+typedef struct LyroreMainHandle LyroreMainHandle;
+
+/* Pre-parse hook (NEW in Step 5) */
+int lyroreInvokePreParseHook(sqlite3* db, const char** pzSql);
+
+/* Function pointer types for LyroreMain callbacks (registered dynamically) */
+typedef int (*LyrorePreParseFunc)(sqlite3* db, const char* zSql, char** pzModified);
+typedef int (*LyrorePreOptFunc)(void* pLyroreMain, sqlite3* db, void* pParse, void* pSelect);
+typedef void (*LyroreEstimateFunc)(void* pLyroreMain, sqlite3* db, void* pBuilder, void* pLoop);
+typedef void (*LyrorePostQueryFunc)(void* pLyroreMain, sqlite3* db, void* pVdbe);
+typedef void (*LyroreAnalyzeFunc)(void* pLyroreMain, sqlite3* db, int iDb);
+
+/* Register LyroreMain callbacks (called when LyroreMain is instantiated) */
+void lyrore_register_main_callbacks(
+    LyrorePreParseFunc preparse_func,
+    LyrorePreOptFunc preopt_func,
+    LyroreEstimateFunc estimate_func,
+    LyrorePostQueryFunc postquery_func,
+    LyroreAnalyzeFunc analyze_func
+);
+
+/* Set/get LyroreMain pointer for a database connection */
+void lyrore_main_set_db(sqlite3* db, LyroreMainHandle* main);
+LyroreMainHandle* lyrore_main_get_db(sqlite3* db);
+
 /* Context lifecycle */
 LyroreCppContext* lyrore_cpp_create(sqlite3* db);
 void lyrore_cpp_destroy(LyroreCppContext* ctx);
@@ -39,9 +65,6 @@ int lyrore_cpp_invoke_preopt(LyroreCppContext* ctx, void* pParse, void* pSelect)
 void lyrore_cpp_invoke_estimate(LyroreCppContext* ctx, void* pBuilder, void* pLoop);
 void lyrore_cpp_invoke_analyze(LyroreCppContext* ctx, int iDb);
 void lyrore_cpp_invoke_postquery(LyroreCppContext* ctx, void* pVdbe);
-
-/* SQL function to register plugins */
-void lyrore_register_functions(sqlite3* db);
 
 /* Context lifecycle - called from main.c */
 int lyroreInit(sqlite3 *db);

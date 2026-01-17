@@ -1,126 +1,141 @@
 /*
 ** Lyrore C ABI Implementation
 ** 
-** Provides SQL function for plugin registration, hook wrappers,
-** and internal SQLite function wrappers for C++ SDK access.
+** Provides hook wrappers for LyroreMain callbacks and
+** internal SQLite function wrappers for C++ SDK access.
 */
 
 #ifdef SQLITE_ENABLE_LYRORE
 
 #include "sqliteInt.h"
 #include "lyrore_cabi.h"
-#include <dlfcn.h>
-
-/* 
-** C++ SDK functions are linked directly into the binary.
-** These are declared in lyrore_cabi.h and implemented in cpp_context.cpp.
-*/
-
-/*
-** SQL function: lyrore_register(path)
-** Loads a plugin from the given path.
-*/
-static void lyroreRegisterFunc(
-  sqlite3_context *context,
-  int argc,
-  sqlite3_value **argv
-){
-  sqlite3 *db = sqlite3_context_db_handle(context);
-  const char *path;
-  int rc;
-
-  if( argc!=1 ){
-    sqlite3_result_error(context, "lyrore_register requires exactly 1 argument", -1);
-    return;
-  }
-
-  /* Check if plugins are enabled */
-  if( !(db->flags & SQLITE_LyrorePlugins) ){
-    sqlite3_result_error(context, "Plugins disabled. Use: PRAGMA lyrore_plugins=ON", -1);
-    return;
-  }
-
-  path = (const char*)sqlite3_value_text(argv[0]);
-  if( !path ){
-    sqlite3_result_error(context, "Invalid plugin path", -1);
-    return;
-  }
-
-  /* Create C++ context if needed */
-  if( !db->pLyrore ){
-    db->pLyrore = lyrore_cpp_create(db);
-    if( !db->pLyrore ){
-      sqlite3_result_error(context, "Failed to create Lyrore context", -1);
-      return;
-    }
-  }
-
-  /* Load the plugin via C++ SDK */
-  rc = lyrore_cpp_load_plugin(db->pLyrore, path);
-  if( rc!=SQLITE_OK ){
-    sqlite3_result_error(context, "Failed to load plugin", -1);
-    return;
-  }
-
-  sqlite3_result_text(context, "Plugin loaded successfully", -1, SQLITE_STATIC);
-}
-
-/*
-** Register the lyrore_register SQL function.
-*/
-void lyrore_register_functions(sqlite3* db){
-  sqlite3_create_function(db, "lyrore_register", 1, 
-                          SQLITE_UTF8|SQLITE_DIRECTONLY, 
-                          NULL, lyroreRegisterFunc, NULL, NULL);
-}
 
 /*
 ** Hook wrapper functions - called from SQLite core
+** These call through function pointers registered by LyroreMain
 */
 
+/* Function pointers for LyroreMain callbacks */
+static LyrorePreParseFunc g_preparse_func = 0;
+static LyrorePreOptFunc g_preopt_main_func = 0;
+static LyroreEstimateFunc g_estimate_main_func = 0;
+static LyrorePostQueryFunc g_postquery_main_func = 0;
+static LyroreAnalyzeFunc g_analyze_main_func = 0;
+
 int lyroreInvokePreOptHooks(sqlite3 *db, void *pParse, void *pSelect){
-  LyroreCppContext *ctx = db->pLyrore;
-  if( !ctx ) return SQLITE_OK;
   if( !(db->flags & SQLITE_LyroreEnabled) ) return SQLITE_OK;
-  return lyrore_cpp_invoke_preopt(ctx, pParse, pSelect);
+  if( db->pLyroreMain && g_preopt_main_func ){
+    return g_preopt_main_func(db->pLyroreMain, db, pParse, pSelect);
+  }
+  return SQLITE_OK;
 }
 
 void lyroreInvokeEstimateHooks(sqlite3 *db, void *pBuilder, void *pLoop){
-  LyroreCppContext *ctx = db->pLyrore;
-  if( !ctx ) return;
   if( !(db->flags & SQLITE_LyroreCost) ) return;
-  lyrore_cpp_invoke_estimate(ctx, pBuilder, pLoop);
+  if( db->pLyroreMain && g_estimate_main_func ){
+    g_estimate_main_func(db->pLyroreMain, db, pBuilder, pLoop);
+  }
 }
 
 void lyroreInvokeAnalyzeHooks(sqlite3 *db, int iDb){
-  LyroreCppContext *ctx = db->pLyrore;
-  if( !ctx ) return;
   if( !(db->flags & SQLITE_LyroreEnabled) ) return;
-  lyrore_cpp_invoke_analyze(ctx, iDb);
+  if( db->pLyroreMain && g_analyze_main_func ){
+    g_analyze_main_func(db->pLyroreMain, db, iDb);
+  }
 }
 
 void lyroreInvokePostQueryHooks(sqlite3 *db, void *pVdbe){
-  LyroreCppContext *ctx = db->pLyrore;
-  if( !ctx ) return;
   if( !(db->flags & SQLITE_LyroreEnabled) ) return;
-  lyrore_cpp_invoke_postquery(ctx, pVdbe);
+  if( db->pLyroreMain && g_postquery_main_func ){
+    g_postquery_main_func(db->pLyroreMain, db, pVdbe);
+  }
 }
 
+/*
+** Pre-parse hook for SQL transformation
+** Called from prepare.c before sqlite3RunParser()
+** Uses thread-local storage for the modified SQL string
+*/
+static __thread char* g_preparse_modified_sql = 0;
+
+/*
+** Register LyroreMain callbacks.
+** Called from C++ when LyroreMain singleton is created.
+*/
+void lyrore_register_main_callbacks(
+    LyrorePreParseFunc preparse_func,
+    LyrorePreOptFunc preopt_func,
+    LyroreEstimateFunc estimate_func,
+    LyrorePostQueryFunc postquery_func,
+    LyroreAnalyzeFunc analyze_func
+){
+  g_preparse_func = preparse_func;
+  g_preopt_main_func = preopt_func;
+  g_estimate_main_func = estimate_func;
+  g_postquery_main_func = postquery_func;
+  g_analyze_main_func = analyze_func;
+}
+
+/*
+** Set/get LyroreMain pointer for a database connection.
+*/
+void lyrore_main_set_db(sqlite3* db, LyroreMainHandle* main){
+  db->pLyroreMain = main;
+}
+
+LyroreMainHandle* lyrore_main_get_db(sqlite3* db){
+  return db->pLyroreMain;
+}
+
+int lyroreInvokePreParseHook(sqlite3 *db, const char** pzSql){
+  char* zModified = 0;
+  int rc;
+
+  /* Free any previous modified SQL */
+  if( g_preparse_modified_sql ){
+    sqlite3_free(g_preparse_modified_sql);
+    g_preparse_modified_sql = 0;
+  }
+
+  /* Check if Lyrore is enabled */
+  if( !(db->flags & SQLITE_LyroreEnabled) ){
+    return SQLITE_OK;
+  }
+
+  /* Call through function pointer if LyroreMain is available */
+  if( db->pLyroreMain && g_preparse_func ){
+    rc = g_preparse_func(db, *pzSql, &zModified);
+    if( rc!=SQLITE_OK ){
+      return rc;
+    }
+    if( zModified ){
+      g_preparse_modified_sql = zModified;
+      *pzSql = g_preparse_modified_sql;
+    }
+  }
+
+  return SQLITE_OK;
+}
+
+/* Cleanup function for thread-local modified SQL */
+void lyrorePreParseCleanup(void){
+  if( g_preparse_modified_sql ){
+    sqlite3_free(g_preparse_modified_sql);
+    g_preparse_modified_sql = 0;
+  }
+}
 
 /* ============================================================
 ** Lyrore Lifecycle Functions
-** Called from main.c and pragma.c
 ** ============================================================ */
 
 /*
 ** Initialize Lyrore for a database connection.
 ** Called from sqlite3_open* after basic setup.
+** LyroreMain will set db->pLyroreMain when it manages the connection.
 */
 int lyroreInit(sqlite3 *db){
-  /* Register lyrore_register() SQL function */
-  lyrore_register_functions(db);
-
-  /* Context is created lazily when first plugin is loaded */
+  (void)db;
   return SQLITE_OK;
 }
 
@@ -129,31 +144,22 @@ int lyroreInit(sqlite3 *db){
 ** Called from sqlite3_close* before cleanup.
 */
 void lyroreShutdown(sqlite3 *db){
-  if( db->pLyrore ){
-    lyrore_cpp_destroy(db->pLyrore);
-    db->pLyrore = 0;
-  }
+  /* LyroreMain manages its own cleanup */
+  db->pLyroreMain = 0;
 }
 
 /*
 ** Persist Lyrore state (placeholder for future use).
-** Called by PRAGMA lyrore_persist.
 */
 void lyrorePersistNow(sqlite3 *db){
-  /* Currently a no-op - state persistence not yet implemented */
   (void)db;
 }
 
 /*
 ** Reset Lyrore state.
-** Called by PRAGMA lyrore_reset.
 */
 void lyroreReset(sqlite3 *db){
-  if( db->pLyrore ){
-    /* Destroy and recreate context to reset state */
-    lyrore_cpp_destroy(db->pLyrore);
-    db->pLyrore = 0;
-  }
+  (void)db;
 }
 
 /* ============================================================
@@ -209,7 +215,6 @@ u64_wrapper lyrore_sqlite3LogEstToInt(LogEst_wrapper x){
   return (u64_wrapper)sqlite3LogEstToInt((LogEst)x);
 }
 
-
 /* SrcList wrapper functions */
 SrcList* lyrore_sqlite3SrcListAppend(Parse* pParse, SrcList* pList, 
                                      Token* pTable, Token* pDatabase){
@@ -219,7 +224,6 @@ SrcList* lyrore_sqlite3SrcListAppend(Parse* pParse, SrcList* pList,
 void lyrore_sqlite3SrcListDelete(sqlite3* db, SrcList* pList){
   sqlite3SrcListDelete(db, pList);
 }
-
 
 /* Additional functions for AST rewrite support */
 Table* lyrore_sqlite3FindTable(sqlite3* db, const char* zName, const char* zDatabase){
@@ -238,25 +242,4 @@ int lyrore_get_parse_nTab(Parse* pParse){
 
 void* lyrore_sqlite3DbMallocZero(sqlite3* db, u64 n){
   return sqlite3DbMallocZero(db, n);
-}
-
-/* Debug function to dump schema tables */
-void lyrore_debug_dump_schema(sqlite3* db) {
-#ifdef SQLITE_ENABLE_LYRORE
-    fprintf(stderr, "[SCHEMA_DUMP] db=%p, nDb=%d\n", (void*)db, db ? db->nDb : -1);
-    if (!db) return;
-    for (int i = 0; i < db->nDb; i++) {
-        fprintf(stderr, "[SCHEMA_DUMP] db[%d].zDbSName=%s\n", i, 
-                db->aDb[i].zDbSName ? db->aDb[i].zDbSName : "(null)");
-        if (db->aDb[i].pSchema && db->aDb[i].pSchema->tblHash.count > 0) {
-            HashElem *elem;
-            for (elem = db->aDb[i].pSchema->tblHash.first; elem; elem = elem->next) {
-                Table* pTab = (Table*)elem->data;
-                fprintf(stderr, "[SCHEMA_DUMP]   table: %s (virtual=%d)\n", 
-                        pTab->zName ? pTab->zName : "(null)",
-                        pTab->eTabType == TABTYP_VTAB ? 1 : 0);
-            }
-        }
-    }
-#endif
 }

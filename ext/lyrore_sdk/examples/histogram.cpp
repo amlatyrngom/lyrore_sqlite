@@ -6,6 +6,7 @@
 */
 
 #include "lyrore_plugin.hpp"
+#include "lyrore_custom_op.hpp"
 #include "lyrore_pattern.hpp"
 #include <vector>
 #include <algorithm>

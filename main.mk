@@ -564,13 +564,13 @@ LIBOBJS0 = alter.o analyze.o attach.o auth.o \
          vdbetrace.o vdbevtab.o vtab.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
          window.o \
-         cpp_context.o pattern.o table_cursor.o custom_op_registry.o scalar_wrapper.o vtab_wrapper.o ast_rewrite.o ly_expr.o preupdate_router.o version_manager.o lyrore_cabi.o
+         cpp_context.o pattern.o table_cursor.o custom_op_registry.o scalar_wrapper.o vtab_wrapper.o ast_rewrite.o ly_expr.o preupdate_router.o version_manager.o lyrore_main.o lyrore_cabi.o
 LIBOBJS = $(LIBOBJS0)
 
 #
 # Object files for the amalgamation.
 #
-LIBOBJS1 = sqlite3.o cpp_context.o pattern.o table_cursor.o custom_op_registry.o scalar_wrapper.o vtab_wrapper.o ast_rewrite.o ly_expr.o preupdate_router.o version_manager.o
+LIBOBJS1 = sqlite3.o cpp_context.o pattern.o table_cursor.o custom_op_registry.o scalar_wrapper.o vtab_wrapper.o ast_rewrite.o ly_expr.o preupdate_router.o version_manager.o lyrore_main.o
 
 #
 # Determine the real value of LIBOBJ based on whether the amalgamation
@@ -1472,6 +1472,9 @@ preupdate_router.o:	$(TOP)/ext/lyrore_sdk/src/preupdate_router.cpp $(DEPS_OBJ_CO
 
 version_manager.o:	$(TOP)/ext/lyrore_sdk/src/version_manager.cpp $(DEPS_OBJ_COMMON)
 	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/version_manager.cpp
+lyrore_main.o:	$(TOP)/ext/lyrore_sdk/src/lyrore_main.cpp $(DEPS_OBJ_COMMON)
+	$(CXX) $(CFLAGS) $(OPTS) -std=c++17 -fPIC -I$(TOP)/ext/lyrore_sdk/include -I$(TOP)/src -I. -c $(TOP)/ext/lyrore_sdk/src/lyrore_main.cpp
+
 
 tclsqlite.o:	$(T.tcl.env.sh) $(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
 	$(T.compile.tcl) -DUSE_TCL_STUBS=1 $$TCL_INCLUDE_SPEC \

@@ -8,18 +8,36 @@ A C++ SDK for SQLite query optimization plugins. Build plugins that transform qu
 # Build SQLite with Lyrore (one-time)
 mkdir -p ~/sqlite_build && cd ~/sqlite_build
 ~/sqlite/configure
-make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1 -DSQLITE_ENABLE_PREUPDATE_HOOK=1" "LDFLAGS=-rdynamic"
+make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1 -DSQLITE_ENABLE_STMT_SCANSTATUS=1 -DSQLITE_ENABLE_PREUPDATE_HOOK=1" "LDFLAGS=-rdynamic"
 
 # Build plugins
 cd ~/sqlite/ext/lyrore_sdk && make
 ```
 
-## Loading Plugins
+## Loading Plugins (LyroreMain API)
 
-```sql
-PRAGMA lyrore_enabled = ON;
-PRAGMA lyrore_plugins = ON;
-SELECT lyrore_register('/path/to/plugin.so');
+Plugins are loaded through the centralized LyroreMain singleton. This provides:
+- Plugin hot-reload without restart
+- Transaction-aware versioning
+- Shared resource registry across plugins
+- Comprehensive post-query statistics
+
+```cpp
+#include "lyrore_main.hpp"
+
+int main() {
+    auto main = lyrore::LyroreMain::instance();
+    sqlite3* db = main->get_db("mydb", ":memory:");
+
+    // Load a plugin
+    main->reload_plugin("mydb", "my_plugin", "./my_plugin.so");
+
+    // Use db as normal sqlite3*...
+    // Plugin hooks are automatically invoked during query processing.
+
+    main->shutdown();
+    return 0;
+}
 ```
 
 ## Plugin Hooks
@@ -27,6 +45,7 @@ SELECT lyrore_register('/path/to/plugin.so');
 | Hook | Purpose |
 |------|---------|
 | `onInit` | Initialize patterns, register custom operators |
+| `onPreParse` | Transform SQL before parsing (custom dialects) |
 | `onPreOpt` | Transform AST before optimization |
 | `onEstimate` | Override cardinality estimates |
 | `onAnalyze` | Build models during ANALYZE |
@@ -287,6 +306,7 @@ void onPreOpt(PreOptContext& ctx) {
 ```
 ext/lyrore_sdk/
 ├── include/
+│   ├── lyrore_main.hpp       # LyroreMain singleton (entry point)
 │   ├── lyrore_plugin.hpp     # Plugin base, contexts, LyValue
 │   ├── lyrore_pattern.hpp    # Pattern matching API
 │   ├── lyrore_custom_op.hpp  # Custom operators + Storage API
@@ -297,6 +317,7 @@ ext/lyrore_sdk/
 │   ├── udf_transform.cpp     # AST transformation
 │   └── fast_groupby.cpp      # Custom GROUP BY operator
 └── tests/
+    ├── lyrore_main_test.cpp  # LyroreMain integration tests (8 tests)
     ├── custom_op_test.cpp    # Custom operator tests
     └── storage_test.cpp      # Storage operator tests
 ```
@@ -321,13 +342,13 @@ Follow these steps to build everything from a clean state:
 # STEP 1: Clean everything
 # ============================================
 rm -f ~/sqlite_build/libsqlite3.so ~/sqlite_build/sqlite3
-rm -f ~/sqlite/ext/lyrore_sdk/*.so
+rm -f ~/sqlite/ext/lyrore_sdk/*.so ~/sqlite/ext/lyrore_sdk/build/*
 
 # ============================================
 # STEP 2: Build SQLite with Lyrore
 # ============================================
 cd ~/sqlite_build
-make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1 -DSQLITE_ENABLE_PREUPDATE_HOOK=1" "LDFLAGS=-rdynamic"
+make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1 -DSQLITE_ENABLE_STMT_SCANSTATUS=1 -DSQLITE_ENABLE_PREUPDATE_HOOK=1" "LDFLAGS=-rdynamic"
 
 # ============================================
 # STEP 3: Build SDK plugins
@@ -339,57 +360,41 @@ make clean && make
 # STEP 4: Run tests
 # ============================================
 cd ~/sqlite/ext/lyrore_sdk
-~/sqlite_build/sqlite3 :memory: <<'EOF'
-PRAGMA lyrore_enabled=ON;
-PRAGMA lyrore_plugins=ON;
-SELECT lyrore_register('./storage_test.so');
-SELECT run_storage_tests();
-EOF
+./build/lyrore_main_test
 ```
 
 ### One-Liner for Full Rebuild & Test
 
 ```bash
-cd ~/sqlite_build && rm -f libsqlite3.so sqlite3 && make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1 -DSQLITE_ENABLE_PREUPDATE_HOOK=1" "LDFLAGS=-rdynamic" && cd ~/sqlite/ext/lyrore_sdk && make clean && make && ~/sqlite_build/sqlite3 :memory: "PRAGMA lyrore_enabled=ON; PRAGMA lyrore_plugins=ON; SELECT lyrore_register('./storage_test.so'); SELECT run_storage_tests();"
+cd ~/sqlite_build && rm -f libsqlite3.so sqlite3 && make -j4 "OPTS=-DSQLITE_ENABLE_LYRORE=1 -DSQLITE_ENABLE_STMT_SCANSTATUS=1 -DSQLITE_ENABLE_PREUPDATE_HOOK=1" "LDFLAGS=-rdynamic" && cd ~/sqlite/ext/lyrore_sdk && make clean && make && ./build/lyrore_main_test
 ```
 
-### Run Storage Test Suite
+### Run Main Test Suite
 
 ```bash
 cd ~/sqlite/ext/lyrore_sdk
-~/sqlite_build/sqlite3 :memory: <<'EOF'
-PRAGMA lyrore_enabled=ON;
-PRAGMA lyrore_plugins=ON;
-SELECT lyrore_register('./storage_test.so');
-SELECT run_storage_tests();
-EOF
+./build/lyrore_main_test
 ```
 
 Expected output:
 ```
-=== Storage Operator Test Suite ===
-PASS: Test 1: Basic CRUD operations
-PASS: Test 2: Transaction Rollback
-PASS: Test 3: Crash Recovery Detection
-PASS: Test 4: Performance (GROUP BY Speedup)
-PASS: Test 5: Replicated Mode Sync
-PASS: Test 6: Trigger Function
-=== Results: 6 passed, 0 failed ===
-ALL TESTS PASSED
+=== LyroreMain Test Suite ===
+Test 1: Singleton Lifecycle... PASS
+Test 2: Plugin Hot-Reload... PASS
+Test 3: Transaction Version Binding... PASS
+Test 4: Pre-Parse Dialect Transform... PASS
+Test 5: Statement-Level Statistics... PASS
+Test 6: Per-Scan Statistics... PASS
+Test 7: Shared Resource Registry... PASS
+Test 8: SDK Compatibility... PASS (storage tests verified, 58x speedup)
+
+=== Results: 8 passed, 0 failed ===
 ```
 
-### E2E Demo: Storage Operator
+### E2E Demo: Storage Operator Performance
 
-```bash
-cd ~/sqlite/ext/lyrore_sdk
-~/sqlite_build/sqlite3 :memory: <<'EOF'
-PRAGMA lyrore_enabled=ON;
-PRAGMA lyrore_plugins=ON;
-
--- Load storage test plugin
-SELECT lyrore_register('./storage_test.so');
-
--- Run all storage tests
-SELECT run_storage_tests();
-EOF
+```cpp
+// See tests/storage_test.cpp for complete implementation
+// Demonstrates: columnar storage with 30x+ GROUP BY speedup
+// Verified by Test 8 in lyrore_main_test
 ```

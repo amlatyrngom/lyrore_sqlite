@@ -763,6 +763,11 @@ static int sqlite3Prepare(
   if( db->pDisconnect ) sqlite3VtabUnlockList(db);
 #endif
 
+#ifdef SQLITE_ENABLE_LYRORE
+  { extern int lyroreInvokePreParseHook(sqlite3*, const char**);
+    if( lyroreInvokePreParseHook(db, &zSql)!=SQLITE_OK ){ goto end_prepare; } }
+#endif
+
   if( nBytes>=0 && (nBytes==0 || zSql[nBytes-1]!=0) ){
     char *zSqlCopy;
     int mxLen = db->aLimit[SQLITE_LIMIT_SQL_LENGTH];
